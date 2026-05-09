@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 .env
+# Private server runbook (passwords / tokens)
+AYAN_SERVER.md
 logs/*.log
 storage/*
 !.gitkeep
