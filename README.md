@@ -7,7 +7,6 @@ Production-oriented Telegram bot: PostgreSQL, Redis, FastAPI webhook, admin pane
 - **Clone:** `git clone https://github.com/sixtyfourbitsquad/new-9-may-bot.git`
 - **Single VPS:** see [`deploy/VPS_DEPLOYMENT.md`](deploy/VPS_DEPLOYMENT.md)
 - **Multiple bots on one VPS:** see [`MULTI_BOT_VPS_SETUP.md`](MULTI_BOT_VPS_SETUP.md)
-- **Private server runbook (passwords, per-machine):** copy [`AYAN_SERVER.md`](AYAN_SERVER.md) locally — it is **gitignored** and will not be pushed.
 
 ## Setup
 

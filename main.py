@@ -15,6 +15,7 @@ from typing import AsyncIterator
 
 import uvloop
 from fastapi import FastAPI, Header, HTTPException, Request
+from telegram import Update
 from bot.application import build_application, create_redis_client, seed_initial_owner
 from configs.settings import Settings, get_settings
 from database.pool import close_pool, get_pool, init_pool

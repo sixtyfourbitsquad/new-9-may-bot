@@ -96,15 +96,21 @@ Repeat similarly for bot-beta (`tg_beta`, password `2`), bot-gamma (`tg_gamma`, 
 
 Create `.env` in each bot folder with bot-specific values.
 
-Example (`/opt/tg-bots/bot-alpha/.env`):
+**Telegram user ids (admins / owner)** — these are **your real numeric ids**, not placeholders:
+
+- **`ADMIN_USER_IDS`** — **Required.** Comma-separated list of Telegram **user** ids (digits only) who receive forwarded user messages in private chat with the bot. Each listed user must **`/start`** the bot once. Get ids from a bot such as `@userinfobot` / `@RawDataBot` or Telegram “copy id” flows — paste **your** numbers here, not examples from docs.
+- **`INITIAL_OWNER_ID`** — **Optional.** If set to **your** numeric user id, the app can seed the **owner** role in the database when there are no owners yet. Often the same number as you put in `ADMIN_USER_IDS` (your own id). You may omit this field if you do not need automatic owner bootstrap.
+
+Example (`/opt/tg-bots/bot-alpha/.env`) — replace secrets and ids with yours:
 
 ```env
-BOT_TOKEN=PUT_BOT_TOKEN_HERE
+BOT_TOKEN=
 WEBHOOK_BASE_URL=https://alpha.yourdomain.com
 WEBHOOK_PATH=/tg/webhook/{secret}
-WEBHOOK_SECRET=put-long-random-secret-here
-ADMIN_USER_IDS=123456789,987654321
-INITIAL_OWNER_ID=PUT_OWNER_ID_HERE
+WEBHOOK_SECRET=
+
+ADMIN_USER_IDS=
+INITIAL_OWNER_ID=
 
 POSTGRES_DSN=postgresql://tg_alpha:1@127.0.0.1:5432/tg_alpha
 POSTGRES_POOL_MIN=2
@@ -128,6 +134,8 @@ USER_MESSAGE_RATE_PER_MINUTE=30
 ADMIN_REPLY_RATE_PER_MINUTE=120
 LIVESTREAM_COOLDOWN_SECONDS=300
 ```
+
+Before `systemctl enable/start`, fill **`BOT_TOKEN`**, **`WEBHOOK_SECRET`**, and **`ADMIN_USER_IDS`** (at least one real user id). Leaving `ADMIN_USER_IDS` empty will fail app startup.
 
 For second bot, use:
 
