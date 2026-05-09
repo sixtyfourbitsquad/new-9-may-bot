@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram Community Bot (FastAPI webhook + workers)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/telegram-bot
+EnvironmentFile=/opt/telegram-bot/.env
+ExecStart=/opt/telegram-bot/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# Hardening (adjust if needed)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
