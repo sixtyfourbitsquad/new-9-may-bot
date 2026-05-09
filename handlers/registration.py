@@ -18,10 +18,11 @@ from handlers import admin_fsm_private, channel_handlers, user_handlers
 def register_handlers(application: Application, settings: Settings) -> None:
     """Attach all handlers with priority groups (lower runs first)."""
 
-    admin_chat_filter = filters.Chat(chat_id=settings.admin_chat_id)
+    # Private inbox for each admin user id (same as user id in private chat with bot)
+    admin_inbox_filter = filters.Chat(chat_id=tuple(settings.admin_user_ids))
 
     application.add_handler(
-        MessageHandler(admin_chat_filter & filters.REPLY, user_handlers.admin_inbox_reply),
+        MessageHandler(admin_inbox_filter & filters.REPLY, user_handlers.admin_inbox_reply),
         group=-1,
     )
 

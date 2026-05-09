@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,8 +33,29 @@ class Settings(BaseSettings):
         description="If set, Telegram sends X-Telegram-Bot-Api-Secret-Token header",
     )
 
-    # Admin chat: supergroup where admins receive user forwards (recommended)
-    admin_chat_id: int = Field(..., description="Telegram chat id for support inbox / admin panel")
+    # Admins receive user forwards in private chat (comma-separated user ids). Listed as str so
+    # pydantic-settings does not JSON-decode env values before validators run.
+    admin_user_ids_csv: str = Field(
+        ...,
+        validation_alias="ADMIN_USER_IDS",
+        description="Comma-separated Telegram user ids",
+    )
+
+    @field_validator("admin_user_ids_csv")
+    @classmethod
+    def validate_admin_user_ids_csv(cls, v: str) -> str:
+        parts = [p.strip() for p in v.split(",") if p.strip()]
+        if not parts:
+            raise ValueError("ADMIN_USER_IDS must contain at least one numeric user id")
+        for p in parts:
+            int(p)
+        return v
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def admin_user_ids(self) -> list[int]:
+        parts = [p.strip() for p in self.admin_user_ids_csv.split(",") if p.strip()]
+        return [int(p) for p in parts]
 
     # Bootstrap: optional first owner user id (seeded on startup if DB has no owners)
     initial_owner_id: int | None = Field(

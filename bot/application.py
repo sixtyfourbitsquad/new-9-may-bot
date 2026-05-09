@@ -49,7 +49,7 @@ def build_application(*, settings: Settings, redis: Redis, pool) -> Application:
 
     rate_lc = RateLimitService(redis, prefix=f"{settings.redis_rate_prefix}lc:")
     live_chat = LiveChatService(
-        admin_chat_id=settings.admin_chat_id,
+        admin_user_ids=settings.admin_user_ids,
         users=users_repo,
         redis=redis,
         rate=rate_lc,

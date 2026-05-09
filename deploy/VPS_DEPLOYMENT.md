@@ -31,7 +31,7 @@ For several bots on one server, see `MULTI_BOT_VPS_SETUP.md`.
    - `BOT_TOKEN` from BotFather.
    - `WEBHOOK_BASE_URL=https://bot.example.com`
    - `WEBHOOK_SECRET` long random string (embedded in webhook URL).
-   - `ADMIN_CHAT_ID` — create a private supergroup, add the bot + admins, use `/chatid` helper bot or `getUpdates` once to read the numeric id (negative).
+   - `ADMIN_USER_IDS` — comma-separated numeric **user** ids; each admin gets forwards in **private chat** with the bot (they must `/start` the bot first).
    - `INITIAL_OWNER_ID` — your Telegram user id for automatic owner seeding.
 
 5. **Install Python 3.12+**:
