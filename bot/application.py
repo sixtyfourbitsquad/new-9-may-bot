@@ -54,6 +54,7 @@ def build_application(*, settings: Settings, redis: Redis, pool) -> Application:
         admin_user_ids=settings.admin_user_ids,
         users=users_repo,
         redis=redis,
+        admins=admins,
         rate=rate_lc,
         user_rate_per_minute=settings.user_message_rate_per_minute,
         admin_rate_per_minute=settings.admin_reply_rate_per_minute,

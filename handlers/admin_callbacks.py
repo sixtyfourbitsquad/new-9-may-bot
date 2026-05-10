@@ -263,7 +263,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             f"Monitored channel id: `{ch.get('monitored_chat_id')}`\n"
             f"Join requests (total): `{ch.get('join_requests_total', 0)}`\n"
             f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
-            f"ADMIN_USER_IDS: `{adm_txt}`\n"
+            f"Staff ids (env): `{adm_txt}`\n"
             f"PostgreSQL: `{'ok' if pool_ok else 'fail'}`\n"
             f"Redis: `{'ok' if redis_ok else 'fail'}`\n"
             f"Onboarding drip: `{settings.onboarding_drip_enabled}` (env `ONBOARDING_DRIP_ENABLED`)\n"

@@ -10,6 +10,7 @@ from telegram import Bot, Message
 from telegram.constants import ChatType
 from telegram.error import Forbidden, TelegramError
 
+from database.repositories.admins import AdminRepository
 from database.repositories.users import UserRepository
 from models.domain import UserBroadcastStatus
 from services.rate_limit_service import RateLimitService
@@ -32,14 +33,16 @@ class LiveChatService:
         admin_user_ids: Collection[int],
         users: UserRepository,
         redis: Redis,
+        admins: AdminRepository | None = None,
         redis_mapping_prefix: str = "lcmap:",
         rate: RateLimitService,
         user_rate_per_minute: int = 30,
         admin_rate_per_minute: int = 120,
     ) -> None:
-        self._admin_ids: FrozenSet[int] = frozenset(int(x) for x in admin_user_ids)
-        if not self._admin_ids:
+        self._env_admin_ids: FrozenSet[int] = frozenset(int(x) for x in admin_user_ids)
+        if not self._env_admin_ids:
             raise ValueError("admin_user_ids must not be empty")
+        self._admins = admins
         self._users = users
         self._redis = redis
         self._prefix = redis_mapping_prefix
@@ -48,7 +51,23 @@ class LiveChatService:
         self._admin_rpm = admin_rate_per_minute
 
     def admin_ids(self) -> FrozenSet[int]:
-        return self._admin_ids
+        return self._env_admin_ids
+
+    async def is_staff(self, uid: int) -> bool:
+        """ENV admins table + optional DB admins row."""
+        if uid in self._env_admin_ids:
+            return True
+        if self._admins is not None and await self._admins.is_admin(uid):
+            return True
+        return False
+
+    async def recipient_admin_ids(self) -> list[int]:
+        """Everyone who receives DM copies of user messages (env ∪ DB admins)."""
+        ids: set[int] = set(self._env_admin_ids)
+        if self._admins is not None:
+            for row in await self._admins.list_admins():
+                ids.add(int(row["admin_id"]))
+        return sorted(ids)
 
     def _map_key(self, inbox_chat_id: int, inbox_message_id: int) -> str:
         """Redis key for copy_message fallback (unique per admin inbox)."""
@@ -61,14 +80,14 @@ class LiveChatService:
         uid = message.from_user.id if message.from_user else None
         if uid is None:
             return
-        if uid in self._admin_ids:
+        if await self.is_staff(uid):
             return
         ok = await self._rate.allow(f"user:{uid}", limit=self._user_rpm, window_seconds=60)
         if not ok:
             logger.info("Rate limited user %s", uid)
             return
 
-        for aid in sorted(self._admin_ids):
+        for aid in await self.recipient_admin_ids():
             await self._forward_one_admin(bot, message, uid, aid)
 
     async def _forward_one_admin(self, bot: Bot, message: Message, user_id: int, admin_id: int) -> None:
@@ -116,11 +135,11 @@ class LiveChatService:
         """
         if message.chat.type != ChatType.PRIVATE:
             return False
-        if message.chat_id not in self._admin_ids:
-            return False
-        if message.from_user and message.from_user.id not in self._admin_ids:
-            return False
         if message.reply_to_message is None:
+            return False
+        if not await self.is_staff(message.chat_id):
+            return False
+        if message.from_user and not await self.is_staff(message.from_user.id):
             return False
 
         target_user_id: Optional[int] = None
