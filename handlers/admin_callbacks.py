@@ -624,7 +624,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:wm:add":
         await fsm.set(uid, {"state": STATE_WM_WAIT})
         await q.edit_message_text(
-            "Send the welcome step content (supports media).\n`/cancel`",
+            "Send the welcome step content (supports media).\n\n"
+            "_Link buttons:_ use **Message everyone** → *Add link buttons* for JSON, "
+            "or send text/media from a bot message that already has URL buttons (saved when Telegram sends them).\n\n"
+            "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
             ),

@@ -84,6 +84,7 @@ async def send_from_payload(
             lambda: bot.send_video_note(
                 chat_id=chat_id,
                 video_note=str(payload.get("file_id") or payload.get("video_note")),
+                reply_markup=markup,
                 disable_notification=disable_notification,
             )
         )
@@ -139,6 +140,7 @@ async def send_from_payload(
                 options=list(payload.get("options") or []),
                 is_anonymous=bool(payload.get("is_anonymous", True)),
                 allows_multiple_answers=bool(payload.get("allows_multiple_answers", False)),
+                reply_markup=markup,
                 disable_notification=disable_notification,
             )
         )
