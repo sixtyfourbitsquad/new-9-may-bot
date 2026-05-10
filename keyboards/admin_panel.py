@@ -9,31 +9,31 @@ def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("📊 Dashboard", callback_data="adm:dashboard"),
-                InlineKeyboardButton("📣 Broadcasts", callback_data="adm:broadcasts"),
+                InlineKeyboardButton("📊 Summary", callback_data="adm:dashboard"),
+                InlineKeyboardButton("📣 Message everyone", callback_data="adm:broadcasts"),
             ],
             [
-                InlineKeyboardButton("⏱ Scheduled", callback_data="adm:scheduled"),
-                InlineKeyboardButton("👋 Welcome", callback_data="adm:welcome"),
+                InlineKeyboardButton("⏱ Send later", callback_data="adm:scheduled"),
+                InlineKeyboardButton("👋 New user welcome", callback_data="adm:welcome"),
             ],
             [
-                InlineKeyboardButton("♻️ Retention", callback_data="adm:retention"),
-                InlineKeyboardButton("📺 Channel / Live", callback_data="adm:channel"),
+                InlineKeyboardButton("♻️ Come-back messages", callback_data="adm:retention"),
+                InlineKeyboardButton("📺 Channel", callback_data="adm:channel"),
             ],
             [
-                InlineKeyboardButton("📈 Users", callback_data="adm:users"),
+                InlineKeyboardButton("📈 People stats", callback_data="adm:users"),
                 InlineKeyboardButton("📜 Logs", callback_data="adm:logs"),
             ],
             [
-                InlineKeyboardButton("🧱 Queue", callback_data="adm:queue"),
-                InlineKeyboardButton("👮 Admins", callback_data="adm:admins"),
+                InlineKeyboardButton("📬 Send queue", callback_data="adm:queue"),
+                InlineKeyboardButton("👮 Staff", callback_data="adm:admins"),
             ],
             [
-                InlineKeyboardButton("🔘 Buttons", callback_data="adm:buttons"),
-                InlineKeyboardButton("❤️ Health", callback_data="adm:health"),
+                InlineKeyboardButton("🔘 Saved buttons", callback_data="adm:buttons"),
+                InlineKeyboardButton("❤️ Server check", callback_data="adm:health"),
             ],
             [
-                InlineKeyboardButton("⚙️ Configuration", callback_data="adm:config"),
+                InlineKeyboardButton("⚙️ Bot setup", callback_data="adm:config"),
             ],
         ]
     )

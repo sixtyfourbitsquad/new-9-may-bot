@@ -54,6 +54,18 @@ class BroadcastService:
 
         batches = await self._users.iter_recipient_batches(self._chunk_size)
         total_targets = sum(len(b) for b in batches)
+
+        if total_targets == 0:
+            await self._broadcasts.update_counters(broadcast_id, total_targets=0)
+            await self._broadcasts.mark_started(broadcast_id)
+            await self._broadcasts.mark_finished(broadcast_id, BroadcastStatus.COMPLETED)
+            await self._r.delete(lock_key)
+            logger.warning(
+                "Broadcast %s has no recipients (users must /start the bot and not block it)",
+                broadcast_id,
+            )
+            return 0
+
         await self._broadcasts.update_counters(broadcast_id, total_targets=total_targets)
         await self._broadcasts.update_status(broadcast_id, BroadcastStatus.QUEUED)
         await self._broadcasts.mark_started(broadcast_id)
@@ -78,6 +90,7 @@ class BroadcastService:
             await self._r.rpush(self._queue_key, _dumps(job))
             count += 1
         logger.info("Enqueued %s jobs for broadcast %s", count, broadcast_id)
+        await self._r.delete(lock_key)
         return count
 
     async def set_paused(self, broadcast_id: int, paused: bool) -> None:

@@ -7,10 +7,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 def broadcasts_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("➕ New broadcast", callback_data="adm:bc:new")],
-            [InlineKeyboardButton("▶️ Active / control", callback_data="adm:bc:active")],
-            [InlineKeyboardButton("📜 Recent", callback_data="adm:bc:recent")],
-            [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
+            [InlineKeyboardButton("✏️ Write new message", callback_data="adm:bc:new")],
+            [InlineKeyboardButton("📊 Check progress", callback_data="adm:bc:active")],
+            [InlineKeyboardButton("📜 Past sends", callback_data="adm:bc:recent")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="adm:home")],
         ]
     )
 

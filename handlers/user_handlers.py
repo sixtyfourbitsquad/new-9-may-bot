@@ -63,8 +63,10 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
         await update.message.reply_text(
-            "Community bot: broadcasts, support forwarding, and channel tools.\n"
-            "Admins: /admin — wizards: /cancel"
+            "Hi! This bot helps your community.\n\n"
+            "Admins: type /admin for the control panel.\n"
+            "Anyone: /cancel stops a step you started.\n\n"
+            "Need help? Message the team through this bot."
         )
 
 
@@ -74,7 +76,10 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from keyboards.admin_panel import main_menu
 
     if update.message:
-        await update.message.reply_text("🔧 Admin panel", reply_markup=main_menu())
+        await update.message.reply_text(
+            "Control panel — tap a button:",
+            reply_markup=main_menu(),
+        )
 
 
 async def any_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -95,6 +95,15 @@ async def broadcast_worker_loop(
         total = int(st.get("total") or 0)
         processed = int(st.get("processed") or 0)
         if total > 0 and processed >= total:
+            delivered = int(st.get("delivered") or 0)
+            failed = int(st.get("failed") or 0)
+            blocked = int(st.get("blocked") or 0)
+            await broadcasts.update_counters(
+                bid,
+                delivered=delivered,
+                failed=failed,
+                blocked=blocked,
+            )
             await broadcasts.mark_finished(bid, BroadcastStatus.COMPLETED)
 
     while not stop_event.is_set():

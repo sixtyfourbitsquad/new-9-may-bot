@@ -52,16 +52,44 @@ def _bc_control_kb(bid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("⏸ Pause", callback_data=f"adm:bc:p:{bid}"),
-                InlineKeyboardButton("▶️ Resume", callback_data=f"adm:bc:r:{bid}"),
+                InlineKeyboardButton("⏸ Pause sending", callback_data=f"adm:bc:p:{bid}"),
+                InlineKeyboardButton("▶️ Continue", callback_data=f"adm:bc:r:{bid}"),
             ],
-            [InlineKeyboardButton("🛑 Cancel job", callback_data=f"adm:bc:c:{bid}")],
+            [InlineKeyboardButton("🛑 Stop this send", callback_data=f"adm:bc:c:{bid}")],
             [
-                InlineKeyboardButton("📊 Stats", callback_data=f"adm:bc:v:{bid}"),
-                InlineKeyboardButton("⬅️ Broadcasts", callback_data="adm:broadcasts"),
+                InlineKeyboardButton("📊 See progress", callback_data=f"adm:bc:v:{bid}"),
+                InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts"),
             ],
         ]
     )
+
+
+def _human_broadcast_progress_text(row: dict, st: dict) -> str:
+    """Plain-language summary for operators."""
+    bid = row.get("id")
+    lines = [
+        f"📣 **Send #{bid}**",
+        "",
+        f"**Status:** {row.get('status')}",
+        f"**People on your list:** {row.get('total_targets')}",
+        f"**Saved counts — Delivered:** {row.get('delivered_count')} · **Problems:** {row.get('failed_count')} · **Blocked you:** {row.get('blocked_count')}",
+    ]
+    if st:
+        def gv(key: str) -> str:
+            v = st.get(key)
+            return str(v) if v is not None else ""
+
+        lines.extend(
+            [
+                "",
+                "**Right now:**",
+                f"· Sent OK: `{gv('delivered') or '0'}`",
+                f"· Still waiting: `{gv('remaining') or '?'}`",
+                f"· Errors: `{gv('failed') or '0'}` · Blocked: `{gv('blocked') or '0'}`",
+                f"· Finished steps: `{gv('processed') or '0'}` / `{gv('total') or '?'}`",
+            ]
+        )
+    return "\n".join(lines)
 
 
 async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -89,15 +117,17 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # --- Navigation ---
     if data == "adm:home":
-        await q.edit_message_text("🔧 Admin panel", reply_markup=main_menu())
+        await q.edit_message_text("Main menu — tap an option:", reply_markup=main_menu())
         return
 
     if data == "adm:dashboard":
         stats = await users_repo.get_stats_snapshot()
         text = (
-            "📊 **Dashboard**\n\n"
-            f"Users: `{stats.get('total', 0)}` | active: `{stats.get('active', 0)}` | blocked: `{stats.get('blocked', 0)}`\n"
-            f"Webhook: `{settings.webhook_full_url()}`"
+            "📊 **Quick summary**\n\n"
+            f"· Everyone who used the bot: `{stats.get('total', 0)}`\n"
+            f"· Can still receive messages: `{stats.get('active', 0)}`\n"
+            f"· Blocked the bot: `{stats.get('blocked', 0)}`\n\n"
+            "_Technical webhook URL is under **Bot setup**._"
         )
         await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
         return
@@ -107,13 +137,14 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         active_rows = await br.list_active()
         active_preview = ", ".join(str(int(r["id"])) for r in active_rows[:8]) if active_rows else "—"
         text = (
-            f"🧱 **Broadcast queue**\n\n"
-            f"Redis depth: `{qlen}`\n"
-            f"Active jobs: `{active_preview}`"
+            "📬 **Message sending queue**\n\n"
+            f"· Lines waiting to send: `{qlen}`\n"
+            f"· Active send jobs: `{active_preview}`\n\n"
+            "_Only use **Clear queue** if a technician asked you to._"
         )
         kb = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("🧹 Clear Redis queue", callback_data="adm:queue:clr")],
+                [InlineKeyboardButton("🧹 Clear waiting line", callback_data="adm:queue:clr")],
                 [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
             ]
         )
@@ -122,7 +153,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data == "adm:queue:clr":
         await redis.delete(settings.redis_broadcast_queue)
-        await q.answer("Pending Redis broadcast queue cleared.")
+        await q.answer("Waiting line cleared.")
         await settings_repo.audit_log("INFO", "queue", "redis cleared", {"admin": uid})
         return
 
@@ -242,14 +273,24 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # --- Broadcasts ---
     if data == "adm:broadcasts":
-        await q.edit_message_text("📣 **Broadcast manager**", reply_markup=broadcasts_menu(), parse_mode="Markdown")
+        n_recipients = await users_repo.count_active_recipients()
+        await q.edit_message_text(
+            "📣 **Message everyone**\n\n"
+            f"Right now **`{n_recipients}`** people can receive your next message "
+            "(they pressed Start and did not block the bot).\n\n"
+            "Choose an option below.",
+            reply_markup=broadcasts_menu(),
+            parse_mode="Markdown",
+        )
         return
 
     if data == "adm:bc:new":
         await fsm.set(uid, {"state": STATE_BC_WAIT_MSG})
         await q.edit_message_text(
-            "Send me **one message** in private chat (text, photo, video, poll, sticker…).\n"
-            "Forwarded messages use copy mode.\n\n`/cancel` to abort.",
+            "**Step 1 — Build your message**\n\n"
+            "Send **one** message here (text, photo, video, voice note, etc.).\n"
+            "If you **forward** a message, the bot copies it.\n\n"
+            "/cancel — stop",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts")]]
             ),
@@ -260,8 +301,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:bc:kb":
         await fsm.set(uid, {"state": STATE_BC_WAIT_BUTTONS_JSON})
         await q.edit_message_text(
-            "Paste **inline keyboard JSON** (array of rows). Example:\n"
-            '`[[{"text":"Join","url":"https://t.me/"}]]`\n\n`/cancel`',
+            "**Extra buttons (optional, advanced)**\n\n"
+            "Paste a keyboard in JSON format. Example:\n"
+            '`[[{"text":"Join","url":"https://t.me/"}]]`\n\n'
+            "/cancel — stop",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts")]]
             ),
@@ -272,11 +315,11 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:bc:pr":
         draft = await fsm.get_draft_broadcast(uid)
         if not draft:
-            await q.answer("No draft — create New broadcast first.", show_alert=True)
+            await q.answer("Create a message first: tap **Write new message**.", show_alert=True)
             return
         try:
             await send_from_payload(context.bot, chat_id=q.message.chat_id, payload=draft)
-            await q.answer("Preview sent.")
+            await q.answer("Preview sent here.")
         except Exception as e:
             await q.answer(f"Preview failed: {e}", show_alert=True)
         return
@@ -284,20 +327,20 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:bc:sd":
         draft = await fsm.get_draft_broadcast(uid)
         if not draft:
-            await q.answer("No draft.", show_alert=True)
+            await q.answer("No message saved yet.", show_alert=True)
             return
         n = await users_repo.count_active_recipients()
         await q.edit_message_text(
-            f"📣 **Confirm broadcast**\n\n"
-            f"Queue send to approximately **`{n}`** active recipients?\n\n"
-            "Tap **Confirm & queue** to proceed.",
+            f"**Ready to send?**\n\n"
+            f"This goes to about **`{n}`** people.\n\n"
+            "Tap **Yes, send now** to start. It may take a few minutes for large lists.",
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton("✅ Confirm & queue", callback_data="adm:bc:go"),
-                        InlineKeyboardButton("❌ Cancel draft", callback_data="adm:bc:xx"),
+                        InlineKeyboardButton("✅ Yes, send now", callback_data="adm:bc:go"),
+                        InlineKeyboardButton("❌ Cancel", callback_data="adm:bc:xx"),
                     ],
-                    [InlineKeyboardButton("⬅️ Broadcasts", callback_data="adm:broadcasts")],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts")],
                 ]
             ),
             parse_mode="Markdown",
@@ -307,30 +350,46 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:bc:go":
         draft = await fsm.get_draft_broadcast(uid)
         if not draft:
-            await q.answer("No draft.", show_alert=True)
+            await q.answer("No message saved.", show_alert=True)
             return
+        n = await users_repo.count_active_recipients()
         bid = await br.create_broadcast(created_by=uid, payload=draft, status=BroadcastStatus.QUEUED)
-        await bc_svc.enqueue_broadcast(bid)
+        jobs = await bc_svc.enqueue_broadcast(bid)
         await fsm.clear_draft_broadcast(uid)
-        await q.edit_message_text(
-            f"🚀 Broadcast **`#{bid}`** queued.\n\nTrack in Active / Recent.",
-            reply_markup=broadcasts_menu(),
-            parse_mode="Markdown",
-        )
+
+        if n == 0:
+            text = (
+                "⚠️ **Nobody received it**\n\n"
+                "Your list is empty. Ask users to open the bot and tap **Start**.\n\n"
+                "When at least one person has done that, try again."
+            )
+        elif jobs == 0:
+            text = (
+                "⚠️ **Could not start**\n\n"
+                "Please wait a few seconds and try **Yes, send now** again."
+            )
+        else:
+            text = (
+                f"✅ **Sending started**\n\n"
+                f"Your message is going to **{n}** people. Large lists take time.\n\n"
+                "Tap **Check progress** on the menu to watch results."
+            )
+
+        await q.edit_message_text(text, reply_markup=broadcasts_menu(), parse_mode="Markdown")
         await settings_repo.audit_log("INFO", "broadcast", f"queued {bid}", {"admin": uid})
         return
 
     if data == "adm:bc:xx":
         await fsm.clear_draft_broadcast(uid)
         await fsm.clear(uid)
-        await q.edit_message_text("Draft discarded.", reply_markup=broadcasts_menu())
+        await q.edit_message_text("Cancelled.", reply_markup=broadcasts_menu())
         return
 
     if data == "adm:bc:active":
         rows = await br.list_active()
         if not rows:
             await q.edit_message_text(
-                "No active broadcasts.", reply_markup=broadcasts_menu(), parse_mode="Markdown"
+                "Nothing is sending right now.", reply_markup=broadcasts_menu(), parse_mode="Markdown"
             )
             return
         kb: list[list[InlineKeyboardButton]] = []
@@ -339,14 +398,14 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             kb.append(
                 [
                     InlineKeyboardButton(
-                        f"#{bid} {r['status']}",
+                        f"Send #{bid} ({r['status']})",
                         callback_data=f"adm:bc:v:{bid}",
                     )
                 ]
             )
         kb.append([InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts")])
         await q.edit_message_text(
-            "▶️ **Active broadcasts** — tap for controls:",
+            "**Sends in progress** — tap one:",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown",
         )
@@ -360,14 +419,14 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             kb.append(
                 [
                     InlineKeyboardButton(
-                        f"#{bid} {r['status']}",
+                        f"Send #{bid} ({r['status']})",
                         callback_data=f"adm:bc:v:{bid}",
                     )
                 ]
             )
         kb.append([InlineKeyboardButton("⬅️ Back", callback_data="adm:broadcasts")])
         await q.edit_message_text(
-            "📜 **Recent broadcasts**",
+            "**Past sends** — tap for details:",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown",
         )
@@ -379,22 +438,16 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if not row:
             await q.answer("Not found.", show_alert=True)
             return
-        st = await redis.hgetall(f"broadcast:stats:{bid}")
-        text = (
-            f"📊 **Broadcast `{bid}`**\n"
-            f"Status: `{row.get('status')}`\n"
-            f"Targets: `{row.get('total_targets')}`\n"
-            f"DB delivered/failed/blocked: `{row.get('delivered_count')}` / `{row.get('failed_count')}` / `{row.get('blocked_count')}`\n"
-        )
-        if st:
-            text += "\n**Redis live:**\n" + "\n".join(f"`{k}` → `{v}`" for k, v in st.items())
+        st_raw = await redis.hgetall(f"broadcast:stats:{bid}")
+        st_dict = dict(st_raw) if st_raw else {}
+        text = _human_broadcast_progress_text(dict(row), st_dict)
         await q.edit_message_text(text, reply_markup=_bc_control_kb(bid), parse_mode="Markdown")
         return
 
     if data.startswith("adm:bc:p:"):
         bid = int(data.split(":")[-1])
         await bc_svc.set_paused(bid, True)
-        await q.answer("Paused.")
+        await q.answer("Sending paused.")
         await settings_repo.audit_log("INFO", "broadcast", f"pause {bid}", {"admin": uid})
         return
 
@@ -402,14 +455,14 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         bid = int(data.split(":")[-1])
         await bc_svc.set_paused(bid, False)
         await br.update_status(bid, BroadcastStatus.RUNNING)
-        await q.answer("Resumed.")
+        await q.answer("Sending continued.")
         await settings_repo.audit_log("INFO", "broadcast", f"resume {bid}", {"admin": uid})
         return
 
     if data.startswith("adm:bc:c:"):
         bid = int(data.split(":")[-1])
         await bc_svc.cancel(bid)
-        await q.answer("Cancelled.")
+        await q.answer("Send stopped.")
         await settings_repo.audit_log("INFO", "broadcast", f"cancel {bid}", {"admin": uid})
         return
 

@@ -41,12 +41,12 @@ def _broadcast_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("👁 Preview", callback_data="adm:bc:pr"),
-                InlineKeyboardButton("🚀 Queue send", callback_data="adm:bc:sd"),
+                InlineKeyboardButton("👁 Test on myself", callback_data="adm:bc:pr"),
+                InlineKeyboardButton("📨 Send to everyone", callback_data="adm:bc:sd"),
             ],
             [
-                InlineKeyboardButton("⌨️ Add buttons (JSON)", callback_data="adm:bc:kb"),
-                InlineKeyboardButton("❌ Cancel draft", callback_data="adm:bc:xx"),
+                InlineKeyboardButton("⌨️ Add link buttons (advanced)", callback_data="adm:bc:kb"),
+                InlineKeyboardButton("❌ Discard", callback_data="adm:bc:xx"),
             ],
         ]
     )
@@ -84,7 +84,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await fsm.set_draft_broadcast(uid, payload)
             await fsm.clear(uid)
             await msg.reply_text(
-                "✅ Draft saved. Choose an action:",
+                "Saved. What do you want to do next?",
                 reply_markup=_broadcast_confirm_kb(),
             )
             raise ApplicationHandlerStop
