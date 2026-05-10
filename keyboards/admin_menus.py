@@ -7,6 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 def broadcasts_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("🔄 Refresh", callback_data="adm:broadcasts")],
             [InlineKeyboardButton("✏️ Write new message", callback_data="adm:bc:new")],
             [InlineKeyboardButton("📊 Check progress", callback_data="adm:bc:active")],
             [InlineKeyboardButton("📜 Past sends", callback_data="adm:bc:recent")],
@@ -18,6 +19,7 @@ def broadcasts_menu() -> InlineKeyboardMarkup:
 def scheduled_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("🔄 Refresh", callback_data="adm:scheduled")],
             [InlineKeyboardButton("➕ Schedule broadcast", callback_data="adm:sch:new")],
             [InlineKeyboardButton("📋 Upcoming jobs", callback_data="adm:sch:list")],
             [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
@@ -65,6 +67,7 @@ def retention_menu() -> InlineKeyboardMarkup:
 def channel_live_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("🔄 Refresh", callback_data="adm:channel")],
             [InlineKeyboardButton("🎯 Set channel (forward or id)", callback_data="adm:ch:s")],
             [
                 InlineKeyboardButton("✅ Auto-approve ON", callback_data="adm:ch:auto:1"),
