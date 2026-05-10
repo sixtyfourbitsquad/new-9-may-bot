@@ -33,6 +33,12 @@ class Settings(BaseSettings):
         description="If set, Telegram sends X-Telegram-Bot-Api-Secret-Token header",
     )
 
+    # Call setWebhook on startup (disable for local dev without public URL)
+    webhook_register_on_startup: bool = Field(
+        default=True,
+        validation_alias="WEBHOOK_REGISTER_ON_STARTUP",
+    )
+
     # Admins receive user forwards in private chat (comma-separated user ids). Listed as str so
     # pydantic-settings does not JSON-decode env values before validators run.
     admin_user_ids_csv: str = Field(

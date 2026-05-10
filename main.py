@@ -17,6 +17,8 @@ from typing import AsyncIterator
 import uvloop
 from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Update
+from telegram.error import TelegramError
+
 from bot.application import build_application, create_redis_client, seed_initial_owner
 from configs.settings import Settings, get_settings
 from database.pool import close_pool, get_pool, init_pool
@@ -27,6 +29,53 @@ from workers.retention_worker import retention_worker_loop
 from workers.scheduler_worker import scheduler_worker_loop
 
 logger = logging.getLogger(__name__)
+
+_WEBHOOK_RETRY_ATTEMPTS = 6
+_WEBHOOK_RETRY_DELAYS_SEC = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+
+
+async def _register_webhook(application, settings: Settings) -> bool:
+    """Register webhook with Telegram; retries DNS/transient failures so startup can still succeed."""
+    secret = settings.webhook_secret.get_secret_value()
+    webhook_route = settings.webhook_path.format(secret=secret)
+    url = settings.webhook_full_url()
+    kwargs = {
+        "url": url,
+        "allowed_updates": None,
+        "secret_token": settings.telegram_webhook_secret_token.get_secret_value()
+        if settings.telegram_webhook_secret_token
+        else None,
+        "drop_pending_updates": True,
+    }
+    last_err: BaseException | None = None
+    for attempt in range(_WEBHOOK_RETRY_ATTEMPTS):
+        try:
+            await application.bot.set_webhook(**kwargs)
+            logger.info("Webhook set to %s route_suffix=%s", url, webhook_route)
+            return True
+        except TelegramError as e:
+            last_err = e
+            logger.warning(
+                "setWebhook failed (%s/%s): %s",
+                attempt + 1,
+                _WEBHOOK_RETRY_ATTEMPTS,
+                e,
+            )
+            if attempt + 1 < _WEBHOOK_RETRY_ATTEMPTS:
+                delay = _WEBHOOK_RETRY_DELAYS_SEC[
+                    min(attempt, len(_WEBHOOK_RETRY_DELAYS_SEC) - 1)
+                ]
+                await asyncio.sleep(delay)
+
+    logger.error(
+        "Webhook was NOT registered after %s attempts (last error: %s). "
+        "Telegram must resolve your hostname (%s). "
+        "Check DNS / DuckDNS / nginx HTTPS, then restart this service.",
+        _WEBHOOK_RETRY_ATTEMPTS,
+        last_err,
+        settings.webhook_base_url,
+    )
+    return False
 
 
 def _setup_uvloop() -> None:
@@ -109,17 +158,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.stop_event = stop_event
     app.state.worker_tasks = tasks
 
-    secret = settings.webhook_secret.get_secret_value()
-    webhook_route = settings.webhook_path.format(secret=secret)
-    await application.bot.set_webhook(
-        url=settings.webhook_full_url(),
-        allowed_updates=None,
-        secret_token=settings.telegram_webhook_secret_token.get_secret_value()
-        if settings.telegram_webhook_secret_token
-        else None,
-        drop_pending_updates=True,
-    )
-    logger.info("Webhook set to %s route_suffix=%s", settings.webhook_full_url(), webhook_route)
+    if settings.webhook_register_on_startup:
+        ok = await _register_webhook(application, settings)
+        app.state.webhook_registered = ok
+    else:
+        logger.warning("WEBHOOK_REGISTER_ON_STARTUP=false — skipping setWebhook (dev mode)")
+        app.state.webhook_registered = False
 
     yield
 
@@ -143,8 +187,14 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Telegram Community Bot", lifespan=lifespan)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health(request: Request) -> dict[str, str]:
+        reg = getattr(request.app.state, "webhook_registered", None)
+        body: dict[str, str] = {"status": "ok"}
+        if reg is False:
+            body["webhook"] = "not_registered"
+        elif reg is True:
+            body["webhook"] = "registered"
+        return body
 
     route_path = settings.webhook_path.format(secret=settings.webhook_secret.get_secret_value())
 
