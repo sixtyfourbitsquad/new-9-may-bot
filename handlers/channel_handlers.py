@@ -118,13 +118,17 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     retention: RetentionService = context.application.bot_data["services"]["retention"]
-    delay0 = retention_delay_seconds(rows_sorted[0], default=300)
+    r0 = rows_sorted[0]
+    delay0 = retention_delay_seconds(r0, default=300)
     await retention.schedule_first_step(user.id, delay0)
     logger.info(
-        "Retention step 1 scheduled user_id=%s delay_s=%s monitored=%s",
+        "Retention step 1 scheduled user_id=%s monitored=%s "
+        "first_row step_order=%s delay_seconds(DB)=%s -> schedule delay_s=%s",
         user.id,
-        delay0,
         monitored,
+        int(r0.get("step_order") or 0),
+        r0.get("delay_seconds"),
+        delay0,
     )
     await context.application.bot_data["repos"]["users"].log_activity(
         user.id, "retention_scheduled", {"monitored": int(monitored)}
