@@ -10,6 +10,7 @@ from telegram import Bot
 
 from database.repositories.settings_repo import SettingsRepository
 from services.outbound_sender import send_from_payload
+from utils.payload_coerce import coerce_payload_dict
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ async def send_welcome_sequence(
 ) -> None:
     steps = await settings_repo.list_welcome_steps()
     for row in sorted(steps, key=lambda r: int(r.get("step_order") or 0)):
-        raw = dict(row.get("payload") or {})
+        raw = coerce_payload_dict(row.get("payload"))
         payload = substitute_name_in_payload(raw, display_name)
         try:
             await send_from_payload(bot, chat_id=chat_id, payload=payload)

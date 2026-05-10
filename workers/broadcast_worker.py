@@ -42,8 +42,12 @@ async def broadcast_worker_loop(
             return
 
         payload = await broadcasts.get_payload(bid)
-        if not payload:
-            logger.error("Missing payload for broadcast %s", bid)
+        if not payload or not str(payload.get("kind") or "").strip():
+            logger.error(
+                "Missing or empty payload for broadcast %s (kind=%r)",
+                bid,
+                payload.get("kind") if isinstance(payload, dict) else None,
+            )
             return
 
         async def send_one(uid: int) -> None:

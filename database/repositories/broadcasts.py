@@ -9,6 +9,7 @@ from typing import Any, Optional
 import asyncpg
 
 from models.domain import BroadcastStatus
+from utils.payload_coerce import coerce_payload_dict
 
 
 class BroadcastRepository:
@@ -113,8 +114,7 @@ class BroadcastRepository:
             row = await conn.fetchrow("SELECT payload FROM broadcasts WHERE id = $1;", broadcast_id)
         if row is None:
             return {}
-        p = row["payload"]
-        return dict(p) if isinstance(p, dict) else {}
+        return coerce_payload_dict(row["payload"])
 
     async def get_row(self, broadcast_id: int) -> Optional[dict[str, Any]]:
         async with self._pool.acquire() as conn:

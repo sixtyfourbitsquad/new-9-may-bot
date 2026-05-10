@@ -11,6 +11,7 @@ from configs.settings import Settings
 from database.repositories.settings_repo import SettingsRepository
 from services.outbound_sender import send_from_payload
 from services.retention_service import RetentionService
+from utils.payload_coerce import coerce_payload_dict
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def retention_worker_loop(
                 row = steps_sorted[step_idx] if step_idx < len(steps_sorted) else None
                 if row is None:
                     continue
-                msg_payload = dict(row.get("payload") or {})
+                msg_payload = coerce_payload_dict(row.get("payload"))
                 await send_from_payload(bot, chat_id=uid, payload=msg_payload)
                 nxt = step_idx + 1
                 if nxt < len(steps_sorted):

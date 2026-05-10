@@ -12,6 +12,7 @@ from database.repositories.onboarding_repo import OnboardingRepository
 from database.repositories.users import UserRepository
 from services.outbound_sender import send_from_payload
 from services.welcome_flow import substitute_name_in_payload
+from utils.payload_coerce import coerce_payload_dict
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def onboarding_worker_loop(
         for row in rows:
             job_id = int(row["id"])
             uid = int(row["user_id"])
-            raw_pl = dict(row.get("payload") or {})
+            raw_pl = coerce_payload_dict(row.get("payload"))
             if not raw_pl:
                 await onboarding.mark_job_sent(job_id)
                 continue

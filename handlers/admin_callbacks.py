@@ -127,7 +127,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             f"· Everyone who used the bot: `{stats.get('total', 0)}`\n"
             f"· Can still receive messages: `{stats.get('active', 0)}`\n"
             f"· Blocked the bot: `{stats.get('blocked', 0)}`\n\n"
-            "_Technical webhook URL is under **Bot setup**._"
+            "Advanced URL and webhook settings: open **Bot setup**."
         )
         await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
         return
@@ -140,7 +140,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "📬 **Message sending queue**\n\n"
             f"· Lines waiting to send: `{qlen}`\n"
             f"· Active send jobs: `{active_preview}`\n\n"
-            "_Only use **Clear queue** if a technician asked you to._"
+            "Clear the line only if support asked you to."
         )
         kb = InlineKeyboardMarkup(
             [
