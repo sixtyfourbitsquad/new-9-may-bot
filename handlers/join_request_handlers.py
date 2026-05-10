@@ -37,11 +37,13 @@ async def on_chat_join_request(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     name = jq.from_user.first_name or jq.from_user.full_name or ""
+    redis = context.application.bot_data["redis"]
     await send_welcome_sequence(
         context.bot,
         chat_id=jq.from_user.id,
         display_name=name,
         settings_repo=settings_repo,
+        redis=redis,
     )
 
     if ch.get("auto_approve_join_requests"):

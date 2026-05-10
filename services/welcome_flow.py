@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Any
+from typing import Any, Optional
 
+from redis.asyncio import Redis
 from telegram import Bot
 
 from database.repositories.settings_repo import SettingsRepository
@@ -13,6 +14,8 @@ from services.outbound_sender import send_from_payload
 from utils.payload_coerce import coerce_payload_dict
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_WELCOME_DEDUP_TTL = 600
 
 
 def substitute_name_in_payload(payload: dict[str, Any], name: str) -> dict[str, Any]:
@@ -37,8 +40,25 @@ async def send_welcome_sequence(
     chat_id: int,
     display_name: str,
     settings_repo: SettingsRepository,
+    redis: Optional[Redis] = None,
+    dedup_ttl_seconds: int = _DEFAULT_WELCOME_DEDUP_TTL,
 ) -> None:
+    """
+    Send configured welcome steps in private chat (chat_id = user's private id).
+
+    If ``redis`` is set, skip when a welcome was already sent recently (dedup key),
+    and set the key after a successful full sequence — avoids double sends when both
+    ``chat_join_request`` and ``chat_member`` fire for the same join.
+    """
     steps = await settings_repo.list_welcome_steps()
+    if not steps:
+        return
+    uid = chat_id
+    if redis:
+        dedup_key = f"welcome:dedup:{uid}"
+        if await redis.get(dedup_key):
+            logger.info("Welcome sequence skipped (dedup) user_id=%s", uid)
+            return
     for row in sorted(steps, key=lambda r: int(r.get("step_order") or 0)):
         raw = coerce_payload_dict(row.get("payload"))
         payload = substitute_name_in_payload(raw, display_name)
@@ -46,3 +66,5 @@ async def send_welcome_sequence(
             await send_from_payload(bot, chat_id=chat_id, payload=payload)
         except Exception:
             logger.exception("Welcome step failed step_order=%s", row.get("step_order"))
+    if redis:
+        await redis.set(f"welcome:dedup:{uid}", "1", ex=max(dedup_ttl_seconds, 60))

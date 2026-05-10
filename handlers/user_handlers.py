@@ -30,11 +30,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await user_svc.ingest_from_update(update)
 
     name = update.effective_user.first_name or update.effective_user.full_name or ""
+    redis = context.application.bot_data["redis"]
     await send_welcome_sequence(
         context.bot,
         chat_id=update.effective_chat.id,
         display_name=name,
         settings_repo=settings_repo,
+        redis=redis,
     )
 
     await users_repo.log_activity(update.effective_user.id, "welcome_completed", {})

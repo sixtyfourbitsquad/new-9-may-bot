@@ -16,6 +16,7 @@ from services.broadcast_service import BroadcastService
 from services.livestream_service import LivestreamService
 from services.outbound_sender import merge_inline_keyboard
 from services.retention_service import RetentionService
+from services.welcome_flow import send_welcome_sequence
 from utils.telegram_urls import normalize_manual_live_url
 
 logger = logging.getLogger(__name__)
@@ -70,21 +71,51 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await context.application.bot_data["repos"]["users"].log_activity(
             user.id, "joined_monitored", {"chat": int(monitored)}
         )
-
-    if not ch.get("retention_enabled", True):
-        return
+        name = user.first_name or user.full_name or ""
+        redis = context.application.bot_data.get("redis")
+        await send_welcome_sequence(
+            context.bot,
+            chat_id=user.id,
+            display_name=name,
+            settings_repo=settings_repo,
+            redis=redis,
+        )
+        logger.info(
+            "User joined monitored channel chat_id=%s user_id=%s (welcome sequence attempted)",
+            monitored,
+            user.id,
+        )
 
     became_left = new.status in ("left", "kicked") and old.status not in ("left", "kicked")
+
+    if not ch.get("retention_enabled", True):
+        if became_left:
+            logger.info(
+                "Retention disabled in settings; not scheduling after leave user_id=%s",
+                user.id,
+            )
+        return
+
     if not became_left:
         return
 
     rows = await settings_repo.list_retention_steps()
     rows_sorted = sorted(rows, key=lambda r: int(r.get("step_order") or 0))
     if not rows_sorted:
+        logger.warning(
+            "Retention: user left monitored chat but DB has no retention steps (user_id=%s)",
+            user.id,
+        )
         return
     retention: RetentionService = context.application.bot_data["services"]["retention"]
     delay0 = int(rows_sorted[0].get("delay_seconds") or 300)
     await retention.schedule_first_step(user.id, delay0)
+    logger.info(
+        "Retention step 1 scheduled user_id=%s delay_s=%s monitored=%s",
+        user.id,
+        delay0,
+        monitored,
+    )
     await context.application.bot_data["repos"]["users"].log_activity(
         user.id, "retention_scheduled", {"monitored": int(monitored)}
     )
