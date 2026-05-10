@@ -45,6 +45,13 @@ COLLECT_TARGET_RETENTION = "retention"
 COLLECT_TARGET_SCHEDULED = "scheduled"
 
 
+def _back_admin_kb() -> InlineKeyboardMarkup:
+    """Return to main admin menu (same as /admin panels)."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⬅️ Back to admin", callback_data="adm:home")]]
+    )
+
+
 def _prompt_link_button_wizard() -> str:
     return (
         "**Optional buttons**\n\n"
@@ -72,7 +79,9 @@ async def _complete_link_button_wizard(
     if target == COLLECT_TARGET_WELCOME:
         step = int(st["wm_step"])
         await settings_repo.upsert_welcome_step(step, final_payload)
-        await msg.reply_text(f"👋 Welcome step `{step}` saved.")
+        await msg.reply_text(
+            f"👋 Welcome step `{step}` saved.", reply_markup=_back_admin_kb()
+        )
         await settings_repo.audit_log("INFO", "welcome", f"step {step}", {"admin": uid})
         return
 
@@ -80,7 +89,10 @@ async def _complete_link_button_wizard(
         step_order = int(st["od_step"])
         delay = int(st.get("od_delay") or 3600)
         await onboarding_repo.upsert_message(step_order, delay, final_payload)
-        await msg.reply_text(f"🌱 Onboarding step `{step_order}` message saved.")
+        await msg.reply_text(
+            f"🌱 Onboarding step `{step_order}` message saved.",
+            reply_markup=_back_admin_kb(),
+        )
         await settings_repo.audit_log(
             "INFO", "onboarding", f"step {step_order}", {"admin": uid}
         )
@@ -92,7 +104,8 @@ async def _complete_link_button_wizard(
         await settings_repo.upsert_retention_step(step, delay, final_payload)
         label_h = format_retention_delay_human(delay)
         await msg.reply_text(
-            f"♻️ Come-back step `{step}` saved — **{label_h}** before this step is sent."
+            f"♻️ Come-back step `{step}` saved — **{label_h}** before this step is sent.",
+            reply_markup=_back_admin_kb(),
         )
         await settings_repo.audit_log("INFO", "retention", f"step {step}", {"admin": uid})
         return
@@ -100,7 +113,10 @@ async def _complete_link_button_wizard(
     if target == COLLECT_TARGET_SCHEDULED:
         run_iso = st.get("run_at")
         if not run_iso:
-            await msg.reply_text("Internal error: missing schedule; try again.")
+            await msg.reply_text(
+                "Internal error: missing schedule; try again.",
+                reply_markup=_back_admin_kb(),
+            )
             return
         run_at = datetime.fromisoformat(str(run_iso))
         if run_at.tzinfo is None:
@@ -124,11 +140,15 @@ async def _complete_link_button_wizard(
         await msg.reply_text(
             f"⏱ Scheduled job `#{jid}` — first run about `{run_at.isoformat()}` UTC.{note}",
             parse_mode="Markdown",
+            reply_markup=_back_admin_kb(),
         )
         await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
         return
 
-    await msg.reply_text("Could not save — unknown step. Try /cancel and start again.")
+    await msg.reply_text(
+        "Could not save — unknown step. Try /cancel and start again.",
+        reply_markup=_back_admin_kb(),
+    )
 
 
 def _broadcast_confirm_kb() -> InlineKeyboardMarkup:
@@ -142,6 +162,7 @@ def _broadcast_confirm_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("⌨️ Add link buttons (advanced)", callback_data="adm:bc:kb"),
                 InlineKeyboardButton("❌ Discard", callback_data="adm:bc:xx"),
             ],
+            [InlineKeyboardButton("⬅️ Back to admin", callback_data="adm:home")],
         ]
     )
 
@@ -194,7 +215,10 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     raise ValueError("could not build markup")
                 draft = await fsm.get_draft_broadcast(uid)
                 if not draft:
-                    await msg.reply_text("Draft expired. Start again from Broadcasts → New.")
+                    await msg.reply_text(
+                        "Draft expired. Start again from Broadcasts → New.",
+                        reply_markup=_back_admin_kb(),
+                    )
                     await fsm.clear(uid)
                     raise ApplicationHandlerStop
                 draft["inline_keyboard"] = rows
@@ -202,7 +226,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await fsm.clear(uid)
                 await msg.reply_text("Buttons merged.", reply_markup=_broadcast_confirm_kb())
             except (json.JSONDecodeError, ValueError) as e:
-                await msg.reply_text(f"Invalid JSON: {e}")
+                await msg.reply_text(f"Invalid JSON: {e}", reply_markup=_back_admin_kb())
             raise ApplicationHandlerStop
 
         if state == STATE_SCH_WAIT_FIRST_HOURS:
@@ -210,16 +234,22 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             try:
                 first_hours = float(raw)
             except ValueError:
-                await msg.reply_text("Send a number: hours **from now** until the first send (e.g. `2`, `0.5`).")
+                await msg.reply_text(
+                    "Send a number: hours **from now** until the first send (e.g. `2`, `0.5`).",
+                    reply_markup=_back_admin_kb(),
+                )
                 raise ApplicationHandlerStop
             if first_hours < 0:
-                await msg.reply_text("Hours cannot be negative.")
+                await msg.reply_text(
+                    "Hours cannot be negative.", reply_markup=_back_admin_kb()
+                )
                 raise ApplicationHandlerStop
             await fsm.set(uid, {"state": STATE_SCH_WAIT_REPEAT_HOURS, "first_hours": first_hours})
             await msg.reply_text(
                 "**Step 2/3 — repeat**\n\n"
                 "Send hours between each following broadcast, or `0` for **once only**.\n"
-                "Example: `3` means this broadcast runs **every 3 hours** after the first."
+                "Example: `3` means this broadcast runs **every 3 hours** after the first.",
+                reply_markup=_back_admin_kb(),
             )
             raise ApplicationHandlerStop
 
@@ -231,10 +261,15 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 try:
                     rh = float(raw)
                 except ValueError:
-                    await msg.reply_text("Send a number of hours, or `0` / `no` for a single run.")
+                    await msg.reply_text(
+                        "Send a number of hours, or `0` / `no` for a single run.",
+                        reply_markup=_back_admin_kb(),
+                    )
                     raise ApplicationHandlerStop
                 if rh < 0:
-                    await msg.reply_text("Hours cannot be negative.")
+                    await msg.reply_text(
+                        "Hours cannot be negative.", reply_markup=_back_admin_kb()
+                    )
                     raise ApplicationHandlerStop
                 repeat_h = rh if rh > 0 else None
             first_hours = float(st.get("first_hours") or 0)
@@ -249,7 +284,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             await msg.reply_text(
                 "**Step 3/3 — message**\n\n"
-                "Send the **broadcast** (text, photo, poll, etc.)."
+                "Send the **broadcast** (text, photo, poll, etc.).",
+                reply_markup=_back_admin_kb(),
             )
             raise ApplicationHandlerStop
 
@@ -265,7 +301,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     if rows:
                         await msg.reply_text(
                             "You already added buttons. Send **/done** to save, "
-                            "or send another **button label**."
+                            "or send another **button label**.",
+                            reply_markup=_back_admin_kb(),
                         )
                         raise ApplicationHandlerStop
                     await _complete_link_button_wizard(uid, msg, context, st, base_payload)
@@ -274,7 +311,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 if low in ("/done", "done"):
                     if not rows:
                         await msg.reply_text(
-                            "No buttons yet. Send a **button label**, or **`/skip`** for no buttons."
+                            "No buttons yet. Send a **button label**, or **`/skip`** for no buttons.",
+                            reply_markup=_back_admin_kb(),
                         )
                         raise ApplicationHandlerStop
                     out_pl = dict(base_payload)
@@ -283,7 +321,10 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     raise ApplicationHandlerStop
 
                 if not raw:
-                    await msg.reply_text("Send the text for the button (what users see).")
+                    await msg.reply_text(
+                        "Send the text for the button (what users see).",
+                        reply_markup=_back_admin_kb(),
+                    )
                     raise ApplicationHandlerStop
 
                 nst = dict(st)
@@ -291,7 +332,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 nst["pending_btn_label"] = raw
                 await fsm.set(uid, nst)
                 await msg.reply_text(
-                    "Now send the **link** for this button (`https://...` or `t.me/...`)."
+                    "Now send the **link** for this button (`https://...` or `t.me/...`).",
+                    reply_markup=_back_admin_kb(),
                 )
                 raise ApplicationHandlerStop
 
@@ -299,7 +341,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 url = normalize_manual_live_url(raw)
                 if not url:
                     await msg.reply_text(
-                        "Could not read that link. Send `https://...` or `t.me/...`"
+                        "Could not read that link. Send `https://...` or `t.me/...`",
+                        reply_markup=_back_admin_kb(),
                     )
                     raise ApplicationHandlerStop
                 label = str(st.get("pending_btn_label") or "").strip() or "Open"
@@ -312,7 +355,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await fsm.set(uid, nst)
                 await msg.reply_text(
                     f"Added **{label}**.\n\n"
-                    "Send another **button label**, or **`/done`** to finish."
+                    "Send another **button label**, or **`/done`** to finish.",
+                    reply_markup=_back_admin_kb(),
                 )
                 raise ApplicationHandlerStop
 
@@ -334,7 +378,11 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     "repeat_hours": st.get("repeat_hours"),
                 },
             )
-            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
+            await msg.reply_text(
+                _prompt_link_button_wizard(),
+                parse_mode="Markdown",
+                reply_markup=_back_admin_kb(),
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_WM_BATCH:
@@ -343,7 +391,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             pending.append(pl)
             await fsm.set(uid, {"state": STATE_WM_BATCH, "pending": pending})
             await msg.reply_text(
-                f"Step `{len(pending)}` queued. Send more messages or `/done`."
+                f"Step `{len(pending)}` queued. Send more messages or `/done`.",
+                reply_markup=_back_admin_kb(),
             )
             raise ApplicationHandlerStop
 
@@ -363,7 +412,11 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     "wm_step": next_order,
                 },
             )
-            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
+            await msg.reply_text(
+                _prompt_link_button_wizard(),
+                parse_mode="Markdown",
+                reply_markup=_back_admin_kb(),
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_OD_WAIT_BODY:
@@ -391,7 +444,11 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     "od_delay": delay,
                 },
             )
-            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
+            await msg.reply_text(
+                _prompt_link_button_wizard(),
+                parse_mode="Markdown",
+                reply_markup=_back_admin_kb(),
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_RM_WAIT_HOURS:
@@ -399,10 +456,15 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             try:
                 hours = float(raw)
             except ValueError:
-                await msg.reply_text("Send a number of **hours** (e.g. `2`, `0.5` for 30 min).")
+                await msg.reply_text(
+                    "Send a number of **hours** (e.g. `2`, `0.5` for 30 min).",
+                    reply_markup=_back_admin_kb(),
+                )
                 raise ApplicationHandlerStop
             if hours < 0:
-                await msg.reply_text("Hours cannot be negative.")
+                await msg.reply_text(
+                    "Hours cannot be negative.", reply_markup=_back_admin_kb()
+                )
                 raise ApplicationHandlerStop
             delay = int(round(hours * 3600))
             await fsm.set(uid, {"state": STATE_RM_WAIT_BODY, "delay": delay})
@@ -410,7 +472,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "**Step 2/2 — message**\n\n"
                 "Send the **come-back message** for this step "
                 "(text, photo, video, etc.). Forwards are copied.\n\n"
-                "Then you can add **link buttons** (text → link each time), or **`/skip`**."
+                "Then you can add **link buttons** (text → link each time), or **`/skip`**.",
+                reply_markup=_back_admin_kb(),
             )
             raise ApplicationHandlerStop
 
@@ -432,7 +495,11 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     "rm_delay": delay,
                 },
             )
-            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
+            await msg.reply_text(
+                _prompt_link_button_wizard(),
+                parse_mode="Markdown",
+                reply_markup=_back_admin_kb(),
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_CH_WAIT_ID:
@@ -449,19 +516,24 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except ValueError:
                     await msg.reply_text(
                         "Forward a post from the channel here, or paste numeric chat id "
-                        "(negative for channels/supergroups)."
+                        "(negative for channels/supergroups).",
+                        reply_markup=_back_admin_kb(),
                     )
                     raise ApplicationHandlerStop
             await settings_repo.set_monitored_chat(cid)
             await fsm.clear(uid)
-            await msg.reply_text(f"📺 Monitored chat set to `{cid}`.")
+            await msg.reply_text(
+                f"📺 Monitored chat set to `{cid}`.", reply_markup=_back_admin_kb()
+            )
             await settings_repo.audit_log("INFO", "channel", str(cid), {"admin": uid})
             raise ApplicationHandlerStop
 
         if state == STATE_LS_WAIT_TEMPLATE:
             await settings_repo.update_livestream(notification_template=msg.text or "")
             await fsm.clear(uid)
-            await msg.reply_text("📡 Livestream template updated.")
+            await msg.reply_text(
+                "📡 Livestream template updated.", reply_markup=_back_admin_kb()
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_LS_WAIT_MANUAL_URL:
@@ -469,13 +541,15 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if not normalized:
                 await msg.reply_text(
                     "Could not parse a URL. Send `https://t.me/...` or `t.me/...` "
-                    "(invite or public link)."
+                    "(invite or public link).",
+                    reply_markup=_back_admin_kb(),
                 )
                 raise ApplicationHandlerStop
             await settings_repo.update_livestream(manual_live_url=normalized)
             await fsm.clear(uid)
             await msg.reply_text(
-                "Join live link saved. Livestream alerts will include a Join now button."
+                "Join live link saved. Livestream alerts will include a Join now button.",
+                reply_markup=_back_admin_kb(),
             )
             await settings_repo.audit_log(
                 "INFO", "livestream", "manual_live_url set", {"admin": uid}
@@ -484,17 +558,23 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if state == STATE_AD_WAIT_ID:
             if not await _is_owner(context, uid):
-                await msg.reply_text("⛔ Owners only.")
+                await msg.reply_text(
+                    "⛔ Owners only.", reply_markup=_back_admin_kb()
+                )
                 await fsm.clear(uid)
                 raise ApplicationHandlerStop
             try:
                 new_id = int((msg.text or "").strip())
             except ValueError:
-                await msg.reply_text("Send numeric Telegram user id.")
+                await msg.reply_text(
+                    "Send numeric Telegram user id.", reply_markup=_back_admin_kb()
+                )
                 raise ApplicationHandlerStop
             await admins_repo.add_admin(new_id, AdminRole.SUPPORT, uid)
             await fsm.clear(uid)
-            await msg.reply_text(f"👮 Added `{new_id}` as support.")
+            await msg.reply_text(
+                f"👮 Added `{new_id}` as support.", reply_markup=_back_admin_kb()
+            )
             await settings_repo.audit_log("INFO", "admins", f"add {new_id}", {"admin": uid})
             raise ApplicationHandlerStop
 
@@ -502,5 +582,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         raise
     except Exception:
         logger.exception("FSM handler error")
-        await msg.reply_text("Error; try /cancel and retry.")
+        await msg.reply_text(
+            "Error; try /cancel and retry.", reply_markup=_back_admin_kb()
+        )
         raise ApplicationHandlerStop

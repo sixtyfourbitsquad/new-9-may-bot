@@ -199,6 +199,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # --- Navigation ---
     if data == "adm:home":
+        await fsm.clear(uid)
         await q.edit_message_text("Main menu — tap an option:", reply_markup=main_menu())
         return
 
