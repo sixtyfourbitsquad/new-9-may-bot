@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
@@ -18,20 +19,17 @@ from services.admin_fsm import (
     STATE_BC_WAIT_BUTTONS_JSON,
     STATE_BC_WAIT_MSG,
     STATE_CH_WAIT_ID,
+    STATE_COLLECT_LINK_BUTTONS,
     STATE_LS_WAIT_MANUAL_URL,
     STATE_LS_WAIT_TEMPLATE,
     STATE_OD_WAIT_BODY,
-    STATE_OD_WAIT_KB,
     STATE_RM_WAIT_BODY,
     STATE_RM_WAIT_HOURS,
-    STATE_RM_WAIT_KB,
     STATE_SCH_WAIT_BODY,
     STATE_SCH_WAIT_FIRST_HOURS,
-    STATE_SCH_WAIT_KB,
     STATE_SCH_WAIT_REPEAT_HOURS,
     STATE_WM_BATCH,
     STATE_WM_WAIT,
-    STATE_WM_WAIT_KB,
     AdminFsm,
 )
 from utils.retention_display import format_retention_delay_human
@@ -41,10 +39,96 @@ from utils.message_serializer import message_to_payload
 
 logger = logging.getLogger(__name__)
 
-OPTIONAL_LINK_KB_PROMPT = (
-    "Optional **link buttons** — paste a JSON array of button rows, or send `/skip`.\n"
-    "Example:\n`[[{\"text\":\"Join\",\"url\":\"https://t.me/yourchannel\"}]]`"
-)
+COLLECT_TARGET_WELCOME = "welcome"
+COLLECT_TARGET_ONBOARDING = "onboarding"
+COLLECT_TARGET_RETENTION = "retention"
+COLLECT_TARGET_SCHEDULED = "scheduled"
+
+
+def _prompt_link_button_wizard() -> str:
+    return (
+        "**Optional buttons**\n\n"
+        "Send the **first button label** (the text people tap), or **`/skip`** for no buttons.\n\n"
+        "For each button you add: you’ll send the **label**, then the **link** "
+        "(`https://...` or `t.me/...`). When you’re finished adding buttons, send **`/done`**."
+    )
+
+
+async def _complete_link_button_wizard(
+    uid: int,
+    msg,
+    context: ContextTypes.DEFAULT_TYPE,
+    st: dict[str, Any],
+    final_payload: dict[str, Any],
+) -> None:
+    fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
+    settings_repo: SettingsRepository = context.application.bot_data["repos"]["settings"]
+    scheduled_repo: ScheduledRepository = context.application.bot_data["repos"]["scheduled"]
+    onboarding_repo: OnboardingRepository = context.application.bot_data["repos"]["onboarding"]
+
+    target = str(st.get("collect_for") or "")
+    await fsm.clear(uid)
+
+    if target == COLLECT_TARGET_WELCOME:
+        step = int(st["wm_step"])
+        await settings_repo.upsert_welcome_step(step, final_payload)
+        await msg.reply_text(f"👋 Welcome step `{step}` saved.")
+        await settings_repo.audit_log("INFO", "welcome", f"step {step}", {"admin": uid})
+        return
+
+    if target == COLLECT_TARGET_ONBOARDING:
+        step_order = int(st["od_step"])
+        delay = int(st.get("od_delay") or 3600)
+        await onboarding_repo.upsert_message(step_order, delay, final_payload)
+        await msg.reply_text(f"🌱 Onboarding step `{step_order}` message saved.")
+        await settings_repo.audit_log(
+            "INFO", "onboarding", f"step {step_order}", {"admin": uid}
+        )
+        return
+
+    if target == COLLECT_TARGET_RETENTION:
+        step = int(st["rm_step"])
+        delay = int(st["rm_delay"])
+        await settings_repo.upsert_retention_step(step, delay, final_payload)
+        label_h = format_retention_delay_human(delay)
+        await msg.reply_text(
+            f"♻️ Come-back step `{step}` saved — **{label_h}** before this step is sent."
+        )
+        await settings_repo.audit_log("INFO", "retention", f"step {step}", {"admin": uid})
+        return
+
+    if target == COLLECT_TARGET_SCHEDULED:
+        run_iso = st.get("run_at")
+        if not run_iso:
+            await msg.reply_text("Internal error: missing schedule; try again.")
+            return
+        run_at = datetime.fromisoformat(str(run_iso))
+        if run_at.tzinfo is None:
+            run_at = run_at.replace(tzinfo=timezone.utc)
+        payload = {
+            "mode": "broadcast_enqueue",
+            "created_by": uid,
+            "message": final_payload,
+        }
+        repeat = st.get("repeat_hours")
+        if repeat is not None and float(repeat) > 0:
+            payload["interval_hours"] = float(repeat)
+        jid = await scheduled_repo.create_job(
+            created_by=uid,
+            run_at=run_at,
+            payload=payload,
+        )
+        note = ""
+        if payload.get("interval_hours"):
+            note = f" Repeats every **{payload['interval_hours']}** hour(s)."
+        await msg.reply_text(
+            f"⏱ Scheduled job `#{jid}` — first run about `{run_at.isoformat()}` UTC.{note}",
+            parse_mode="Markdown",
+        )
+        await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
+        return
+
+    await msg.reply_text("Could not save — unknown step. Try /cancel and start again.")
 
 
 def _broadcast_confirm_kb() -> InlineKeyboardMarkup:
@@ -133,7 +217,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 raise ApplicationHandlerStop
             await fsm.set(uid, {"state": STATE_SCH_WAIT_REPEAT_HOURS, "first_hours": first_hours})
             await msg.reply_text(
-                "**Step 2/4 — repeat**\n\n"
+                "**Step 2/3 — repeat**\n\n"
                 "Send hours between each following broadcast, or `0` for **once only**.\n"
                 "Example: `3` means this broadcast runs **every 3 hours** after the first."
             )
@@ -164,11 +248,73 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 },
             )
             await msg.reply_text(
-                "**Step 3/4 — message**\n\n"
-                "Send the **broadcast** (text, photo, poll, etc.). "
-                "Next you can add **link buttons** (JSON) or `/skip`."
+                "**Step 3/3 — message**\n\n"
+                "Send the **broadcast** (text, photo, poll, etc.)."
             )
             raise ApplicationHandlerStop
+
+        if state == STATE_COLLECT_LINK_BUTTONS:
+            phase = str(st.get("btn_phase") or "label")
+            rows = list(st.get("btn_rows") or [])
+            base_payload = dict(st.get("base_payload") or {})
+            raw = (msg.text or "").strip()
+            low = raw.lower()
+
+            if phase == "label":
+                if low in ("/skip", "skip"):
+                    if rows:
+                        await msg.reply_text(
+                            "You already added buttons. Send **/done** to save, "
+                            "or send another **button label**."
+                        )
+                        raise ApplicationHandlerStop
+                    await _complete_link_button_wizard(uid, msg, context, st, base_payload)
+                    raise ApplicationHandlerStop
+
+                if low in ("/done", "done"):
+                    if not rows:
+                        await msg.reply_text(
+                            "No buttons yet. Send a **button label**, or **`/skip`** for no buttons."
+                        )
+                        raise ApplicationHandlerStop
+                    out_pl = dict(base_payload)
+                    out_pl["inline_keyboard"] = rows
+                    await _complete_link_button_wizard(uid, msg, context, st, out_pl)
+                    raise ApplicationHandlerStop
+
+                if not raw:
+                    await msg.reply_text("Send the text for the button (what users see).")
+                    raise ApplicationHandlerStop
+
+                nst = dict(st)
+                nst["btn_phase"] = "url"
+                nst["pending_btn_label"] = raw
+                await fsm.set(uid, nst)
+                await msg.reply_text(
+                    "Now send the **link** for this button (`https://...` or `t.me/...`)."
+                )
+                raise ApplicationHandlerStop
+
+            if phase == "url":
+                url = normalize_manual_live_url(raw)
+                if not url:
+                    await msg.reply_text(
+                        "Could not read that link. Send `https://...` or `t.me/...`"
+                    )
+                    raise ApplicationHandlerStop
+                label = str(st.get("pending_btn_label") or "").strip() or "Open"
+                new_rows = list(rows)
+                new_rows.append([{"text": label, "url": url}])
+                nst = dict(st)
+                nst["btn_phase"] = "label"
+                nst["pending_btn_label"] = None
+                nst["btn_rows"] = new_rows
+                await fsm.set(uid, nst)
+                await msg.reply_text(
+                    f"Added **{label}**.\n\n"
+                    "Send another **button label**, or **`/done`** to finish."
+                )
+                raise ApplicationHandlerStop
 
         if state == STATE_SCH_WAIT_BODY:
             run_iso = st.get("run_at")
@@ -179,60 +325,16 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await fsm.set(
                 uid,
                 {
-                    "state": STATE_SCH_WAIT_KB,
+                    "state": STATE_COLLECT_LINK_BUTTONS,
+                    "collect_for": COLLECT_TARGET_SCHEDULED,
+                    "btn_phase": "label",
+                    "btn_rows": [],
+                    "base_payload": pl,
                     "run_at": run_iso,
                     "repeat_hours": st.get("repeat_hours"),
-                    "sched_message": pl,
-                    "sched_created_by": uid,
                 },
             )
-            await msg.reply_text(OPTIONAL_LINK_KB_PROMPT, parse_mode="Markdown")
-            raise ApplicationHandlerStop
-
-        if state == STATE_SCH_WAIT_KB:
-            run_iso = st.get("run_at")
-            if not run_iso:
-                await fsm.clear(uid)
-                raise ApplicationHandlerStop
-            run_at = datetime.fromisoformat(run_iso)
-            if run_at.tzinfo is None:
-                run_at = run_at.replace(tzinfo=timezone.utc)
-            raw = (msg.text or "").strip()
-            pl = dict(st.get("sched_message") or {})
-            if raw.lower() not in ("/skip", "skip"):
-                try:
-                    rows = json.loads(raw)
-                    if not isinstance(rows, list):
-                        raise ValueError("expected array")
-                    if markup_from_json(rows) is None and rows:
-                        raise ValueError("could not build markup")
-                    pl["inline_keyboard"] = rows
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    await msg.reply_text(f"Invalid JSON: {e}")
-                    raise ApplicationHandlerStop
-            uid_cb = int(st.get("sched_created_by") or uid)
-            payload: dict = {
-                "mode": "broadcast_enqueue",
-                "created_by": uid_cb,
-                "message": pl,
-            }
-            repeat = st.get("repeat_hours")
-            if repeat is not None and float(repeat) > 0:
-                payload["interval_hours"] = float(repeat)
-            jid = await scheduled_repo.create_job(
-                created_by=uid_cb,
-                run_at=run_at,
-                payload=payload,
-            )
-            await fsm.clear(uid)
-            note = ""
-            if payload.get("interval_hours"):
-                note = f" Repeats every **{payload['interval_hours']}** hour(s)."
-            await msg.reply_text(
-                f"⏱ Scheduled job `#{jid}` — first run about `{run_at.isoformat()}` UTC.{note}",
-                parse_mode="Markdown",
-            )
-            await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
+            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
             raise ApplicationHandlerStop
 
         if state == STATE_WM_BATCH:
@@ -241,9 +343,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             pending.append(pl)
             await fsm.set(uid, {"state": STATE_WM_BATCH, "pending": pending})
             await msg.reply_text(
-                f"Step `{len(pending)}` queued. Send more messages or `/done`.\n\n"
-                "Tip: link buttons are not added in batch mode — use **Add step** once per step "
-                "to paste JSON after the message."
+                f"Step `{len(pending)}` queued. Send more messages or `/done`."
             )
             raise ApplicationHandlerStop
 
@@ -254,32 +354,16 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             next_order = mx + 1
             await fsm.set(
                 uid,
-                {"state": STATE_WM_WAIT_KB, "wm_step": next_order, "wm_payload": pl},
+                {
+                    "state": STATE_COLLECT_LINK_BUTTONS,
+                    "collect_for": COLLECT_TARGET_WELCOME,
+                    "btn_phase": "label",
+                    "btn_rows": [],
+                    "base_payload": pl,
+                    "wm_step": next_order,
+                },
             )
-            await msg.reply_text(OPTIONAL_LINK_KB_PROMPT, parse_mode="Markdown")
-            raise ApplicationHandlerStop
-
-        if state == STATE_WM_WAIT_KB:
-            next_order = int(st["wm_step"])
-            pl = dict(st.get("wm_payload") or {})
-            raw = (msg.text or "").strip()
-            if raw.lower() not in ("/skip", "skip"):
-                try:
-                    rows = json.loads(raw)
-                    if not isinstance(rows, list):
-                        raise ValueError("expected array")
-                    if markup_from_json(rows) is None and rows:
-                        raise ValueError("could not build markup")
-                    pl["inline_keyboard"] = rows
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    await msg.reply_text(f"Invalid JSON: {e}")
-                    raise ApplicationHandlerStop
-            await settings_repo.upsert_welcome_step(next_order, pl)
-            await fsm.clear(uid)
-            await msg.reply_text(f"👋 Welcome step `{next_order}` saved.")
-            await settings_repo.audit_log(
-                "INFO", "welcome", f"step {next_order}", {"admin": uid}
-            )
+            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
             raise ApplicationHandlerStop
 
         if state == STATE_OD_WAIT_BODY:
@@ -298,36 +382,16 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await fsm.set(
                 uid,
                 {
-                    "state": STATE_OD_WAIT_KB,
+                    "state": STATE_COLLECT_LINK_BUTTONS,
+                    "collect_for": COLLECT_TARGET_ONBOARDING,
+                    "btn_phase": "label",
+                    "btn_rows": [],
+                    "base_payload": pl,
                     "od_step": step_order,
                     "od_delay": delay,
-                    "od_payload": pl,
                 },
             )
-            await msg.reply_text(OPTIONAL_LINK_KB_PROMPT, parse_mode="Markdown")
-            raise ApplicationHandlerStop
-
-        if state == STATE_OD_WAIT_KB:
-            step_order = int(st["od_step"])
-            delay = int(st.get("od_delay") or 3600)
-            onboarding_repo = context.application.bot_data["repos"]["onboarding"]
-            pl = dict(st.get("od_payload") or {})
-            raw = (msg.text or "").strip()
-            if raw.lower() not in ("/skip", "skip"):
-                try:
-                    rows = json.loads(raw)
-                    if not isinstance(rows, list):
-                        raise ValueError("expected array")
-                    if markup_from_json(rows) is None and rows:
-                        raise ValueError("could not build markup")
-                    pl["inline_keyboard"] = rows
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    await msg.reply_text(f"Invalid JSON: {e}")
-                    raise ApplicationHandlerStop
-            await onboarding_repo.upsert_message(step_order, delay, pl)
-            await fsm.clear(uid)
-            await msg.reply_text(f"🌱 Onboarding step `{step_order}` message saved.")
-            await settings_repo.audit_log("INFO", "onboarding", f"step {step_order}", {"admin": uid})
+            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
             raise ApplicationHandlerStop
 
         if state == STATE_RM_WAIT_HOURS:
@@ -343,10 +407,10 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             delay = int(round(hours * 3600))
             await fsm.set(uid, {"state": STATE_RM_WAIT_BODY, "delay": delay})
             await msg.reply_text(
-                "**Step 2/3 — message**\n\n"
+                "**Step 2/2 — message**\n\n"
                 "Send the **come-back message** for this step "
                 "(text, photo, video, etc.). Forwards are copied.\n\n"
-                "Next: optional link buttons (JSON) or `/skip`."
+                "Then you can add **link buttons** (text → link each time), or **`/skip`**."
             )
             raise ApplicationHandlerStop
 
@@ -359,40 +423,16 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await fsm.set(
                 uid,
                 {
-                    "state": STATE_RM_WAIT_KB,
-                    "delay": delay,
+                    "state": STATE_COLLECT_LINK_BUTTONS,
+                    "collect_for": COLLECT_TARGET_RETENTION,
+                    "btn_phase": "label",
+                    "btn_rows": [],
+                    "base_payload": pl,
                     "rm_step": next_order,
-                    "rm_payload": pl,
+                    "rm_delay": delay,
                 },
             )
-            await msg.reply_text(OPTIONAL_LINK_KB_PROMPT, parse_mode="Markdown")
-            raise ApplicationHandlerStop
-
-        if state == STATE_RM_WAIT_KB:
-            delay = int(st["delay"])
-            next_order = int(st["rm_step"])
-            pl = dict(st.get("rm_payload") or {})
-            raw = (msg.text or "").strip()
-            if raw.lower() not in ("/skip", "skip"):
-                try:
-                    rows = json.loads(raw)
-                    if not isinstance(rows, list):
-                        raise ValueError("expected array")
-                    if markup_from_json(rows) is None and rows:
-                        raise ValueError("could not build markup")
-                    pl["inline_keyboard"] = rows
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    await msg.reply_text(f"Invalid JSON: {e}")
-                    raise ApplicationHandlerStop
-            await settings_repo.upsert_retention_step(next_order, delay, pl)
-            await fsm.clear(uid)
-            label = format_retention_delay_human(delay)
-            await msg.reply_text(
-                f"♻️ Come-back step `{next_order}` saved — **{label}** before this step is sent."
-            )
-            await settings_repo.audit_log(
-                "INFO", "retention", f"step {next_order}", {"admin": uid}
-            )
+            await msg.reply_text(_prompt_link_button_wizard(), parse_mode="Markdown")
             raise ApplicationHandlerStop
 
         if state == STATE_CH_WAIT_ID:

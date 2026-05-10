@@ -14,19 +14,17 @@ STATE_BC_WAIT_BUTTONS_JSON = "bc_kb"
 STATE_SCH_WAIT_FIRST_HOURS = "sch_h_first"
 STATE_SCH_WAIT_REPEAT_HOURS = "sch_h_repeat"
 STATE_SCH_WAIT_BODY = "sch_body"
-STATE_SCH_WAIT_KB = "sch_kb"
 STATE_WM_WAIT = "wm_body"
-STATE_WM_WAIT_KB = "wm_kb"
 STATE_WM_BATCH = "wm_batch"
 STATE_RM_WAIT_HOURS = "rm_hours"
 STATE_RM_WAIT_BODY = "rm_body"
-STATE_RM_WAIT_KB = "rm_kb"
 STATE_CH_WAIT_ID = "ch_id"
 STATE_OD_WAIT_BODY = "od_body"
-STATE_OD_WAIT_KB = "od_kb"
 STATE_LS_WAIT_TEMPLATE = "ls_tpl"
 STATE_LS_WAIT_MANUAL_URL = "ls_manual"
 STATE_AD_WAIT_ID = "ad_id"
+# Simple URL button wizard (label → link), shared by welcome / retention / onboarding / scheduled
+STATE_COLLECT_LINK_BUTTONS = "collect_link_btns"
 
 
 class AdminFsm:

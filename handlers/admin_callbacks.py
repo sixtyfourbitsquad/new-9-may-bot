@@ -551,10 +551,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:sch:new":
         await fsm.set(uid, {"state": STATE_SCH_WAIT_FIRST_HOURS})
         await q.edit_message_text(
-            "**Step 1/4 — when to run the first time**\n\n"
+            "**Step 1/3 — when to run the first time**\n\n"
             "Send **hours from now** until the first broadcast (decimals ok).\n"
             "Examples: `0` as soon as the worker runs · `1` in one hour · `24` in 24 h\n\n"
-            "Then: repeat interval → message → optional link buttons (JSON).\n\n"
+            "Then: repeat interval → message → optional link buttons (simple prompts).\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:scheduled")]]
@@ -623,8 +623,8 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await fsm.set(uid, {"state": STATE_WM_WAIT})
         await q.edit_message_text(
             "Send the welcome step content (supports media).\n\n"
-            "After that, the bot will ask for **optional link buttons**: paste a JSON keyboard "
-            "or `/skip`. You can also copy a message that already has URL buttons.\n\n"
+            "After that, you can add **link buttons** step by step (button text, then link), "
+            "or **`/skip`**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
@@ -638,8 +638,6 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await q.edit_message_text(
             "Send welcome steps **one by one** (text or media; forwards use copy mode).\n"
             "When finished, send `/done`.\n\n"
-            "Batch mode does not include the link-button JSON step — use **Add step** "
-            "when you need buttons on a step.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
@@ -682,7 +680,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await fsm.set(uid, {"state": STATE_OD_WAIT_BODY, "od_step": so})
         await q.edit_message_text(
             f"Send onboarding content for step **`{so}`**. Use `{{name}}` in text/captions.\n\n"
-            "Then you can add **optional link buttons** (JSON) or `/skip`.\n\n"
+            "Then you can add **link buttons** (text → link each time), or **`/skip`**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:onboard")]]
@@ -741,7 +739,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "⚡ **Instant come-back step**\n\n"
             "Send the **message content** now (text, photo, video, etc.). "
             "Forwards are copied.\n\n"
-            "Then: optional **link buttons** (JSON) or `/skip`.\n\n"
+            "Then you can add **link buttons** (text → link), or **`/skip`**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]
