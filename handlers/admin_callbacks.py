@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import time
 
-from telegram import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.files import FSInputFile
 from telegram.ext import ContextTypes
 
 from configs.settings import Settings
