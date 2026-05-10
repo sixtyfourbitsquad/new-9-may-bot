@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from telegram import Bot
+from telegram.error import Forbidden
 
 from configs.settings import Settings
 from database.repositories.settings_repo import SettingsRepository
@@ -47,6 +48,11 @@ async def retention_worker_loop(
                 if nxt < len(steps_sorted):
                     delay = int(steps_sorted[nxt].get("delay_seconds") or 3600)
                     await retention.schedule_next_step(uid, nxt, delay)
+            except Forbidden:
+                logger.warning(
+                    "Retention DM skipped user_id=%s (blocked bot or never started chat)",
+                    uid,
+                )
             except Exception:
                 logger.exception("Retention send failed for %s", member)
         await asyncio.sleep(settings.retention_tick_seconds)

@@ -67,7 +67,7 @@ def build_application(*, settings: Settings, redis: Redis, pool) -> Application:
         chunk_size=settings.broadcast_chunk_size,
     )
 
-    retention = RetentionService(redis)
+    retention = RetentionService(redis, zset_key=settings.redis_retention_zset)
     livestream = LivestreamService(redis, prefix=settings.redis_livestream_prefix)
 
     user_svc = UserService(pool)

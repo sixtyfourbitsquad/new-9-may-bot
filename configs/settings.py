@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     redis_fsm_prefix: str = "fsm:"
     redis_rate_prefix: str = "rate:"
     redis_livestream_prefix: str = "livestream:"
+    redis_retention_zset: str = Field(
+        "retention:due",
+        validation_alias="REDIS_RETENTION_ZSET",
+        description="Redis ZSET for leave/retention drip (unique per bot if Redis is shared)",
+    )
 
     # Workers
     broadcast_concurrency: int = Field(25, ge=1, le=100)

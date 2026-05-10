@@ -230,6 +230,20 @@ def create_app() -> FastAPI:
                 ch.get("id"),
                 frm.get("id"),
             )
+        cm = data.get("chat_member")
+        if isinstance(cm, dict):
+            ch = cm.get("chat") or {}
+            frm = cm.get("from") or {}
+            old_m = cm.get("old_chat_member") or {}
+            new_m = cm.get("new_chat_member") or {}
+            logger.info(
+                "Webhook JSON contains chat_member update_id=%s chat_id=%s actor_user_id=%s %s -> %s",
+                data.get("update_id"),
+                ch.get("id"),
+                frm.get("id"),
+                old_m.get("status"),
+                new_m.get("status"),
+            )
         application = request.app.state.ptb
         update = Update.de_json(data, application.bot)
         await application.process_update(update)

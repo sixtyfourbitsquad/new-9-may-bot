@@ -88,6 +88,15 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     became_left = new.status in ("left", "kicked") and old.status not in ("left", "kicked")
 
+    if became_left:
+        logger.info(
+            "Member left monitored channel chat=%s user_id=%s (%s -> %s)",
+            monitored,
+            user.id,
+            old.status,
+            new.status,
+        )
+
     if not ch.get("retention_enabled", True):
         if became_left:
             logger.info(
