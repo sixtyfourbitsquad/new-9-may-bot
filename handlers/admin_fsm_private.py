@@ -24,7 +24,7 @@ from services.admin_fsm import (
     STATE_LS_WAIT_TEMPLATE,
     STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_BODY,
-    STATE_RM_WAIT_DELAY,
+    STATE_RM_WAIT_HOURS,
     STATE_SCH_WAIT_BODY,
     STATE_SCH_WAIT_TIME,
     STATE_WM_BATCH,
@@ -32,6 +32,7 @@ from services.admin_fsm import (
     AdminFsm,
 )
 from utils.datetime_parse import parse_iso_utc
+from utils.retention_display import format_retention_delay_human
 from utils.telegram_urls import normalize_manual_live_url
 from utils.keyboard_json import markup_from_json
 from utils.message_serializer import message_to_payload
@@ -188,16 +189,17 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await settings_repo.audit_log("INFO", "onboarding", f"step {step_order}", {"admin": uid})
             raise ApplicationHandlerStop
 
-        if state == STATE_RM_WAIT_DELAY:
+        if state == STATE_RM_WAIT_HOURS:
+            raw = (msg.text or "").strip().replace(",", ".")
             try:
-                delay = int((msg.text or "").strip())
-                if delay < 0:
-                    raise ValueError
+                hours = float(raw)
             except ValueError:
-                await msg.reply_text(
-                    "Send a whole number of seconds (e.g. `0` for fast, `3600` for 1 hour)."
-                )
+                await msg.reply_text("Send a number of **hours** (e.g. `2`, `0.5` for 30 min).")
                 raise ApplicationHandlerStop
+            if hours < 0:
+                await msg.reply_text("Hours cannot be negative.")
+                raise ApplicationHandlerStop
+            delay = int(round(hours * 3600))
             await fsm.set(uid, {"state": STATE_RM_WAIT_BODY, "delay": delay})
             await msg.reply_text(
                 "Now send the **come-back message** for this step "
@@ -206,15 +208,15 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             raise ApplicationHandlerStop
 
         if state == STATE_RM_WAIT_BODY:
-            delay = int(st.get("delay") or 3600)
+            delay = int(st["delay"]) if "delay" in st else 3600
             pl = message_to_payload(msg)
             steps = await settings_repo.list_retention_steps()
             mx = max((int(s.get("step_order") or 0) for s in steps), default=0)
             await settings_repo.upsert_retention_step(mx + 1, delay, pl)
             await fsm.clear(uid)
+            label = format_retention_delay_human(delay)
             await msg.reply_text(
-                f"♻️ Come-back step `{mx + 1}` saved "
-                f"(wait **{delay}s** before this step is sent)."
+                f"♻️ Come-back step `{mx + 1}` saved — **{label}** before this step is sent."
             )
             await settings_repo.audit_log("INFO", "retention", f"step {mx+1}", {"admin": uid})
             raise ApplicationHandlerStop

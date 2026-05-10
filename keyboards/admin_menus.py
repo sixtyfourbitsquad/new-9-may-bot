@@ -52,7 +52,10 @@ def onboarding_menu() -> InlineKeyboardMarkup:
 def retention_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("➕ Add step", callback_data="adm:rm:add")],
+            [
+                InlineKeyboardButton("⚡ Instant step", callback_data="adm:rm:add:i"),
+                InlineKeyboardButton("⏱ Delayed (hours)", callback_data="adm:rm:add:d"),
+            ],
             [InlineKeyboardButton("📋 List steps", callback_data="adm:rm:list")],
             [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
         ]

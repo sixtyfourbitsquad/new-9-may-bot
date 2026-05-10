@@ -34,7 +34,8 @@ from services.admin_fsm import (
     STATE_LS_WAIT_MANUAL_URL,
     STATE_LS_WAIT_TEMPLATE,
     STATE_OD_WAIT_BODY,
-    STATE_RM_WAIT_DELAY,
+    STATE_RM_WAIT_BODY,
+    STATE_RM_WAIT_HOURS,
     STATE_SCH_WAIT_TIME,
     STATE_WM_BATCH,
     STATE_WM_WAIT,
@@ -43,6 +44,7 @@ from services.admin_fsm import (
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
 from services.welcome_flow import send_welcome_sequence
+from utils.retention_display import format_retention_delay_human
 
 
 def _h(x: object) -> str:
@@ -626,25 +628,40 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:retention":
         await q.edit_message_text(
             "♻️ **Come-back messages**\n\n"
-            "When someone **leaves** the monitored channel, the bot schedules these messages "
+            "When someone **leaves** the monitored channel, the bot sends these messages "
             "to their **private chat** with the bot.\n\n"
-            "**Delay** = seconds to wait **before that step** "
-            "(step 1: after they left the channel; step 2+: after the previous message was sent). "
-            "Use `0` for almost immediate (~1s).\n\n"
+            "• **Instant step** — send as soon as the bot can (step 1: right after leave; "
+            "later steps: right after the previous message).\n"
+            "• **Delayed step** — you choose **hours** to wait before that step "
+            "(step 1: after they left; step 2+: after the previous come-back message).\n\n"
             "/cancel",
             reply_markup=retention_menu(),
             parse_mode="Markdown",
         )
         return
 
-    if data == "adm:rm:add":
-        await fsm.set(uid, {"state": STATE_RM_WAIT_DELAY})
+    if data == "adm:rm:add:i":
+        await fsm.set(uid, {"state": STATE_RM_WAIT_BODY, "delay": 0})
         await q.edit_message_text(
-            "**Seconds to wait before this step**\n\n"
-            "• **First step:** wait after the user **left** the channel "
-            "(use `0` for almost instant).\n"
-            "• **Later steps:** wait after the **previous** come-back message.\n\n"
-            "Examples: `0` fast · `300` 5 min · `86400` 24 h\n`/cancel`",
+            "⚡ **Instant come-back step**\n\n"
+            "Send the **message content** now (text, photo, video, etc.). "
+            "Forwards are copied.\n\n"
+            "`/cancel`",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data == "adm:rm:add:d":
+        await fsm.set(uid, {"state": STATE_RM_WAIT_HOURS})
+        await q.edit_message_text(
+            "⏱ **Delayed come-back step — hours**\n\n"
+            "How many **hours** to wait **before** this step?\n\n"
+            "• **Step 1:** hours after they **left** the channel.\n"
+            "• **Step 2+:** hours after the **previous** come-back message.\n\n"
+            "Examples: `1` · `24` · `0.5` (30 minutes)\n`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]
             ),
@@ -656,16 +673,25 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         steps = await settings_repo.list_retention_steps()
         if not steps:
             await q.edit_message_text(
-                "No retention steps.", reply_markup=retention_menu(), parse_mode="Markdown"
+                "No come-back steps yet.", reply_markup=retention_menu(), parse_mode="Markdown"
             )
             return
         kb = []
         for s in steps:
             so = int(s["step_order"])
-            kb.append([InlineKeyboardButton(f"🗑 Delete step {so}", callback_data=f"adm:rm:d:{so}")])
+            sec = int(s.get("delay_seconds") or 0)
+            label = format_retention_delay_human(sec)
+            kb.append(
+                [
+                    InlineKeyboardButton(
+                        f"🗑 Step {so} ({label})",
+                        callback_data=f"adm:rm:d:{so}",
+                    )
+                ]
+            )
         kb.append([InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")])
         await q.edit_message_text(
-            "Retention steps:",
+            "**Come-back steps** (delay before each step):",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown",
         )
