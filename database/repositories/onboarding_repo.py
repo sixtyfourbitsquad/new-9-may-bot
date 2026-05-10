@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from utils.payload_coerce import coerce_payload_dict
+
 
 class OnboardingRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -48,8 +50,8 @@ class OnboardingRepository:
             anchor = anchor.replace(tzinfo=timezone.utc)
         async with self._pool.acquire() as conn:
             for r in rows:
-                pl = dict(r.get("payload") or {})
-                if not pl or pl == {}:
+                pl = coerce_payload_dict(r.get("payload"))
+                if not pl:
                     continue
                 delay = int(r.get("delay_seconds") or 0)
                 so = int(r["step_order"])
@@ -91,7 +93,7 @@ class OnboardingRepository:
         out: list[dict[str, Any]] = []
         for r in rows:
             d = dict(r)
-            d["payload"] = dict(d["payload"]) if d.get("payload") else {}
+            d["payload"] = coerce_payload_dict(d.get("payload"))
             out.append(d)
         return out
 
