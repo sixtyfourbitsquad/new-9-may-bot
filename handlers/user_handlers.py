@@ -48,11 +48,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         onboarding: OnboardingRepository = context.application.bot_data["repos"]["onboarding"]
         await onboarding.enqueue_for_user(update.effective_user.id, datetime.now(timezone.utc))
 
-    if update.message:
-        await update.message.reply_text(
-            "👋 You're registered. Use /help if this bot serves your community."
-        )
-
 
 async def cmd_wizard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Skip optional inline buttons (same as ⏭ Skip); commands reach here because FSM excludes COMMAND."""
@@ -101,13 +96,8 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message:
-        await update.message.reply_text(
-            "Hi! This bot helps your community.\n\n"
-            "Admins: type /admin for the control panel.\n"
-            "Anyone: /cancel stops a step you started.\n\n"
-            "Need help? Message the team through this bot."
-        )
+    """No reply — welcome/onboarding carry UX; keeps chat clean."""
+    return
 
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
