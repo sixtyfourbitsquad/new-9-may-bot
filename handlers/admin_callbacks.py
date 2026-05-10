@@ -17,7 +17,6 @@ from database.repositories.settings_repo import SettingsRepository
 from keyboards.admin_menus import (
     admins_menu,
     broadcasts_menu,
-    buttons_menu,
     channel_live_menu,
     onboarding_menu,
     retention_menu,
@@ -31,7 +30,6 @@ from services.admin_fsm import (
     STATE_AD_WAIT_ID,
     STATE_BC_WAIT_BUTTONS_JSON,
     STATE_BC_WAIT_MSG,
-    STATE_BTN_WAIT_NAME,
     STATE_CH_WAIT_ID,
     STATE_LS_WAIT_MANUAL_URL,
     STATE_LS_WAIT_TEMPLATE,
@@ -553,10 +551,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:sch:new":
         await fsm.set(uid, {"state": STATE_SCH_WAIT_FIRST_HOURS})
         await q.edit_message_text(
-            "**Step 1/3 — when to run the first time**\n\n"
+            "**Step 1/4 — when to run the first time**\n\n"
             "Send **hours from now** until the first broadcast (decimals ok).\n"
             "Examples: `0` as soon as the worker runs · `1` in one hour · `24` in 24 h\n\n"
-            "Next the bot will ask if it should **repeat** (e.g. every 3 hours).\n\n"
+            "Then: repeat interval → message → optional link buttons (JSON).\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:scheduled")]]
@@ -625,8 +623,8 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await fsm.set(uid, {"state": STATE_WM_WAIT})
         await q.edit_message_text(
             "Send the welcome step content (supports media).\n\n"
-            "_Link buttons:_ use **Message everyone** → *Add link buttons* for JSON, "
-            "or send text/media from a bot message that already has URL buttons (saved when Telegram sends them).\n\n"
+            "After that, the bot will ask for **optional link buttons**: paste a JSON keyboard "
+            "or `/skip`. You can also copy a message that already has URL buttons.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
@@ -639,7 +637,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await fsm.set(uid, {"state": STATE_WM_BATCH, "pending": []})
         await q.edit_message_text(
             "Send welcome steps **one by one** (text or media; forwards use copy mode).\n"
-            "When finished, send `/done`.\n\n`/cancel`",
+            "When finished, send `/done`.\n\n"
+            "Batch mode does not include the link-button JSON step — use **Add step** "
+            "when you need buttons on a step.\n\n"
+            "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
             ),
@@ -680,7 +681,9 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         so = int(data.split(":")[-1])
         await fsm.set(uid, {"state": STATE_OD_WAIT_BODY, "od_step": so})
         await q.edit_message_text(
-            f"Send onboarding content for step **`{so}`**. Use `{{name}}` in text/captions.\n`/cancel`",
+            f"Send onboarding content for step **`{so}`**. Use `{{name}}` in text/captions.\n\n"
+            "Then you can add **optional link buttons** (JSON) or `/skip`.\n\n"
+            "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:onboard")]]
             ),
@@ -738,6 +741,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "⚡ **Instant come-back step**\n\n"
             "Send the **message content** now (text, photo, video, etc.). "
             "Forwards are copied.\n\n"
+            "Then: optional **link buttons** (JSON) or `/skip`.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]
@@ -876,52 +880,6 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await settings_repo.update_livestream(cooldown_seconds=cd)
         await settings_repo.audit_log("INFO", "livestream", f"cooldown {cd}s", {"admin": uid})
         await _render_channel_panel(q, settings_repo)
-        return
-
-    # --- Buttons ---
-    if data == "adm:buttons":
-        await q.edit_message_text("🔘 **Button presets**", reply_markup=buttons_menu(), parse_mode="Markdown")
-        return
-
-    if data == "adm:btn:new":
-        await fsm.set(uid, {"state": STATE_BTN_WAIT_NAME})
-        await q.edit_message_text(
-            "Preset **name** (unique).\n`/cancel`",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Back", callback_data="adm:buttons")]]
-            ),
-            parse_mode="Markdown",
-        )
-        return
-
-    if data == "adm:btn:list":
-        presets = await settings_repo.list_inline_presets()
-        if not presets:
-            await q.edit_message_text(
-                "No presets.", reply_markup=buttons_menu(), parse_mode="Markdown"
-            )
-            return
-        kb = []
-        for p in presets:
-            pid = int(p["id"])
-            name = (p.get("name") or "")[:24]
-            kb.append(
-                [
-                    InlineKeyboardButton(
-                        f"🗑 {name or pid}",
-                        callback_data=f"adm:btn:d:{pid}",
-                    )
-                ]
-            )
-        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="adm:buttons")])
-        await q.edit_message_text("Presets:", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        return
-
-    if data.startswith("adm:btn:d:"):
-        pid = int(data.split(":")[-1])
-        await settings_repo.delete_inline_preset(pid)
-        await q.answer("Deleted.")
-        await settings_repo.audit_log("INFO", "buttons", f"delete {pid}", {"admin": uid})
         return
 
     # --- Admins ---

@@ -26,9 +26,6 @@ def main_menu() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("📬 Send queue", callback_data="adm:queue"),
-            ],
-            [
-                InlineKeyboardButton("🔘 Saved buttons", callback_data="adm:buttons"),
                 InlineKeyboardButton("❤️ Server check", callback_data="adm:health"),
             ],
             [

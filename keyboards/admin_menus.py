@@ -91,16 +91,6 @@ def channel_live_menu() -> InlineKeyboardMarkup:
     )
 
 
-def buttons_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ New preset", callback_data="adm:btn:new")],
-            [InlineKeyboardButton("📋 List presets", callback_data="adm:btn:list")],
-            [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
-        ]
-    )
-
-
 def admins_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

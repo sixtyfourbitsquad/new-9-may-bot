@@ -38,7 +38,11 @@ async def cmd_welcome_batch_done(update: Update, context: ContextTypes.DEFAULT_T
         await settings_repo.upsert_welcome_step(mx + i, pl)
 
     await fsm.clear(uid)
-    await update.message.reply_text(f"Saved `{len(pending)}` welcome steps.")
+    await update.message.reply_text(
+        f"Saved `{len(pending)}` welcome steps.\n\n"
+        "To attach link buttons to a step, use **Add step** for that step "
+        "(you will be asked for optional button JSON after the message)."
+    )
     await settings_repo.audit_log(
         "INFO",
         "welcome",
