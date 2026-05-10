@@ -183,9 +183,24 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if q is None:
         return
     data = q.data or ""
-    await q.answer()
-
     uid = q.from_user.id if q.from_user else 0
+
+    if data in ("adm:wiz:skip", "adm:wiz:done"):
+        from handlers import admin_fsm_private
+
+        msg = q.message
+        if msg is None:
+            await q.answer("Cannot use here.", show_alert=True)
+            return
+        action = "skip" if data == "adm:wiz:skip" else "done"
+        handled = await admin_fsm_private.apply_collect_link_action(uid, context, action, msg)
+        if not handled:
+            await q.answer("Not in the button step.", show_alert=True)
+        else:
+            await q.answer()
+        return
+
+    await q.answer()
     settings: Settings = context.application.bot_data["settings"]
     redis = context.application.bot_data["redis"]
     users_repo = context.application.bot_data["repos"]["users"]
@@ -625,7 +640,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await q.edit_message_text(
             "Send the welcome step content (supports media).\n\n"
             "After that, you can add **link buttons** step by step (button text, then link), "
-            "or **`/skip`**.\n\n"
+            "or tap **Skip**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
@@ -681,7 +696,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await fsm.set(uid, {"state": STATE_OD_WAIT_BODY, "od_step": so})
         await q.edit_message_text(
             f"Send onboarding content for step **`{so}`**. Use `{{name}}` in text/captions.\n\n"
-            "Then you can add **link buttons** (text → link each time), or **`/skip`**.\n\n"
+            "Then you can add **link buttons** (text → link each time), or tap **Skip**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:onboard")]]
@@ -740,7 +755,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "⚡ **Instant come-back step**\n\n"
             "Send the **message content** now (text, photo, video, etc.). "
             "Forwards are copied.\n\n"
-            "Then you can add **link buttons** (text → link), or **`/skip`**.\n\n"
+            "Then you can add **link buttons** (text → link), or tap **Skip**.\n\n"
             "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]

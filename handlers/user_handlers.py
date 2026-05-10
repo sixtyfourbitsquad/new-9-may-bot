@@ -12,8 +12,11 @@ from database.repositories.onboarding_repo import OnboardingRepository
 from database.repositories.settings_repo import SettingsRepository
 from handlers.admin_callbacks import route_admin_callback
 from middlewares.admin_auth import require_admin
+from services.admin_fsm import STATE_COLLECT_LINK_BUTTONS, AdminFsm
 from services.user_service import UserService
 from services.welcome_flow import send_welcome_sequence
+
+from handlers import admin_fsm_private, welcome_done
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,41 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "👋 You're registered. Use /help if this bot serves your community."
         )
+
+
+async def cmd_wizard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Skip optional inline buttons (same as ⏭ Skip); commands reach here because FSM excludes COMMAND."""
+    if update.effective_user is None or update.message is None:
+        return
+    if not await require_admin(update, context):
+        return
+    uid = update.effective_user.id
+    handled = await admin_fsm_private.apply_collect_link_action(
+        uid, context, "skip", update.message
+    )
+    if not handled:
+        await update.message.reply_text(
+            "Nothing to skip here. Use **Admin** when a step asks for optional buttons.",
+            parse_mode="Markdown",
+        )
+
+
+async def cmd_done_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Link-button wizard /done vs welcome batch /done (STATE_WM_BATCH)."""
+    if update.effective_user is None or update.message is None:
+        return
+    uid = update.effective_user.id
+    fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
+    st = await fsm.get(uid)
+    if st and str(st.get("state") or "") == STATE_COLLECT_LINK_BUTTONS:
+        if not await require_admin(update, context):
+            return
+        handled = await admin_fsm_private.apply_collect_link_action(
+            uid, context, "done", update.message
+        )
+        if handled:
+            return
+    await welcome_done.cmd_welcome_batch_done(update, context)
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

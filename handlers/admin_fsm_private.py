@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database.repositories.scheduled import ScheduledRepository
@@ -52,21 +52,41 @@ def _back_admin_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _wizard_url_phase_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⬅️ Back to admin", callback_data="adm:home")]]
+    )
+
+
+def _wizard_nav_kb(phase: str, num_rows: int) -> InlineKeyboardMarkup:
+    """Skip + Back while no buttons yet; Done + Back once there is at least one row."""
+    if phase == "url":
+        return _wizard_url_phase_kb()
+    row: list[InlineKeyboardButton] = []
+    if num_rows == 0:
+        row.append(InlineKeyboardButton("⏭ Skip", callback_data="adm:wiz:skip"))
+    else:
+        row.append(InlineKeyboardButton("✅ Done", callback_data="adm:wiz:done"))
+    row.append(InlineKeyboardButton("⬅️ Back to admin", callback_data="adm:home"))
+    return InlineKeyboardMarkup([row])
+
+
 def _prompt_link_button_wizard() -> str:
     return (
         "**Optional buttons**\n\n"
-        "Send the **first button label** (the text people tap), or **`/skip`** for no buttons.\n\n"
+        "Send the **first button label** (the text people tap), or tap **Skip** for no buttons.\n\n"
         "For each button you add: you’ll send the **label**, then the **link** "
-        "(`https://...` or `t.me/...`). When you’re finished adding buttons, send **`/done`**."
+        "(`https://...` or `t.me/...`). When you’re finished adding buttons, tap **Done** "
+        "(or send **`/done`**)."
     )
 
 
 async def _complete_link_button_wizard(
     uid: int,
-    msg,
     context: ContextTypes.DEFAULT_TYPE,
     st: dict[str, Any],
     final_payload: dict[str, Any],
+    reply_msg: Message,
 ) -> None:
     fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
     settings_repo: SettingsRepository = context.application.bot_data["repos"]["settings"]
@@ -79,7 +99,7 @@ async def _complete_link_button_wizard(
     if target == COLLECT_TARGET_WELCOME:
         step = int(st["wm_step"])
         await settings_repo.upsert_welcome_step(step, final_payload)
-        await msg.reply_text(
+        await reply_msg.reply_text(
             f"👋 Welcome step `{step}` saved.", reply_markup=_back_admin_kb()
         )
         await settings_repo.audit_log("INFO", "welcome", f"step {step}", {"admin": uid})
@@ -89,7 +109,7 @@ async def _complete_link_button_wizard(
         step_order = int(st["od_step"])
         delay = int(st.get("od_delay") or 3600)
         await onboarding_repo.upsert_message(step_order, delay, final_payload)
-        await msg.reply_text(
+        await reply_msg.reply_text(
             f"🌱 Onboarding step `{step_order}` message saved.",
             reply_markup=_back_admin_kb(),
         )
@@ -103,7 +123,7 @@ async def _complete_link_button_wizard(
         delay = int(st["rm_delay"])
         await settings_repo.upsert_retention_step(step, delay, final_payload)
         label_h = format_retention_delay_human(delay)
-        await msg.reply_text(
+        await reply_msg.reply_text(
             f"♻️ Come-back step `{step}` saved — **{label_h}** before this step is sent.",
             reply_markup=_back_admin_kb(),
         )
@@ -113,7 +133,7 @@ async def _complete_link_button_wizard(
     if target == COLLECT_TARGET_SCHEDULED:
         run_iso = st.get("run_at")
         if not run_iso:
-            await msg.reply_text(
+            await reply_msg.reply_text(
                 "Internal error: missing schedule; try again.",
                 reply_markup=_back_admin_kb(),
             )
@@ -137,7 +157,7 @@ async def _complete_link_button_wizard(
         note = ""
         if payload.get("interval_hours"):
             note = f" Repeats every **{payload['interval_hours']}** hour(s)."
-        await msg.reply_text(
+        await reply_msg.reply_text(
             f"⏱ Scheduled job `#{jid}` — first run about `{run_at.isoformat()}` UTC.{note}",
             parse_mode="Markdown",
             reply_markup=_back_admin_kb(),
@@ -145,10 +165,64 @@ async def _complete_link_button_wizard(
         await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
         return
 
-    await msg.reply_text(
+    await reply_msg.reply_text(
         "Could not save — unknown step. Try /cancel and start again.",
         reply_markup=_back_admin_kb(),
     )
+
+
+CollectLinkAction = Literal["skip", "done"]
+
+
+async def apply_collect_link_action(
+    uid: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    action: CollectLinkAction,
+    reply_msg: Message,
+) -> bool:
+    """Handle Skip/Done for the optional inline-button wizard (message, command, or callback)."""
+    fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
+    st = await fsm.get(uid)
+    if not st or str(st.get("state") or "") != STATE_COLLECT_LINK_BUTTONS:
+        return False
+
+    phase = str(st.get("btn_phase") or "label")
+    rows = list(st.get("btn_rows") or [])
+    base_payload = dict(st.get("base_payload") or {})
+
+    if phase == "url":
+        await reply_msg.reply_text(
+            "Send the **URL** for this button (`https://...` or `t.me/...`).",
+            parse_mode="Markdown",
+            reply_markup=_wizard_url_phase_kb(),
+        )
+        return True
+
+    if action == "skip":
+        if rows:
+            await reply_msg.reply_text(
+                "You already added buttons. Tap **Done** (or send /done) to save, "
+                "or send another **button label**.",
+                parse_mode="Markdown",
+                reply_markup=_wizard_nav_kb("label", len(rows)),
+            )
+            return True
+        await _complete_link_button_wizard(
+            uid, context, st, base_payload, reply_msg=reply_msg
+        )
+        return True
+
+    if not rows:
+        await reply_msg.reply_text(
+            "No buttons yet. Send a **button label**, or tap **Skip**.",
+            parse_mode="Markdown",
+            reply_markup=_wizard_nav_kb("label", 0),
+        )
+        return True
+    out_pl = dict(base_payload)
+    out_pl["inline_keyboard"] = rows
+    await _complete_link_button_wizard(uid, context, st, out_pl, reply_msg=reply_msg)
+    return True
 
 
 def _broadcast_confirm_kb() -> InlineKeyboardMarkup:
@@ -292,38 +366,21 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if state == STATE_COLLECT_LINK_BUTTONS:
             phase = str(st.get("btn_phase") or "label")
             rows = list(st.get("btn_rows") or [])
-            base_payload = dict(st.get("base_payload") or {})
             raw = (msg.text or "").strip()
             low = raw.lower()
 
             if phase == "label":
-                if low in ("/skip", "skip"):
-                    if rows:
-                        await msg.reply_text(
-                            "You already added buttons. Send **/done** to save, "
-                            "or send another **button label**.",
-                            reply_markup=_back_admin_kb(),
-                        )
-                        raise ApplicationHandlerStop
-                    await _complete_link_button_wizard(uid, msg, context, st, base_payload)
-                    raise ApplicationHandlerStop
-
-                if low in ("/done", "done"):
-                    if not rows:
-                        await msg.reply_text(
-                            "No buttons yet. Send a **button label**, or **`/skip`** for no buttons.",
-                            reply_markup=_back_admin_kb(),
-                        )
-                        raise ApplicationHandlerStop
-                    out_pl = dict(base_payload)
-                    out_pl["inline_keyboard"] = rows
-                    await _complete_link_button_wizard(uid, msg, context, st, out_pl)
+                if low in ("/skip", "skip", "/done", "done"):
+                    act: CollectLinkAction = (
+                        "skip" if low in ("/skip", "skip") else "done"
+                    )
+                    await apply_collect_link_action(uid, context, act, msg)
                     raise ApplicationHandlerStop
 
                 if not raw:
                     await msg.reply_text(
                         "Send the text for the button (what users see).",
-                        reply_markup=_back_admin_kb(),
+                        reply_markup=_wizard_nav_kb("label", len(rows)),
                     )
                     raise ApplicationHandlerStop
 
@@ -333,16 +390,24 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await fsm.set(uid, nst)
                 await msg.reply_text(
                     "Now send the **link** for this button (`https://...` or `t.me/...`).",
-                    reply_markup=_back_admin_kb(),
+                    parse_mode="Markdown",
+                    reply_markup=_wizard_url_phase_kb(),
                 )
                 raise ApplicationHandlerStop
 
             if phase == "url":
+                if low in ("/skip", "skip", "/done", "done"):
+                    await msg.reply_text(
+                        "Send the **URL** for this button (`https://...` or `t.me/...`).",
+                        parse_mode="Markdown",
+                        reply_markup=_wizard_url_phase_kb(),
+                    )
+                    raise ApplicationHandlerStop
                 url = normalize_manual_live_url(raw)
                 if not url:
                     await msg.reply_text(
                         "Could not read that link. Send `https://...` or `t.me/...`",
-                        reply_markup=_back_admin_kb(),
+                        reply_markup=_wizard_url_phase_kb(),
                     )
                     raise ApplicationHandlerStop
                 label = str(st.get("pending_btn_label") or "").strip() or "Open"
@@ -355,8 +420,9 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await fsm.set(uid, nst)
                 await msg.reply_text(
                     f"Added **{label}**.\n\n"
-                    "Send another **button label**, or **`/done`** to finish.",
-                    reply_markup=_back_admin_kb(),
+                    "Send another **button label**, or tap **Done** to finish.",
+                    parse_mode="Markdown",
+                    reply_markup=_wizard_nav_kb("label", len(new_rows)),
                 )
                 raise ApplicationHandlerStop
 
@@ -381,7 +447,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await msg.reply_text(
                 _prompt_link_button_wizard(),
                 parse_mode="Markdown",
-                reply_markup=_back_admin_kb(),
+                reply_markup=_wizard_nav_kb("label", 0),
             )
             raise ApplicationHandlerStop
 
@@ -415,7 +481,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await msg.reply_text(
                 _prompt_link_button_wizard(),
                 parse_mode="Markdown",
-                reply_markup=_back_admin_kb(),
+                reply_markup=_wizard_nav_kb("label", 0),
             )
             raise ApplicationHandlerStop
 
@@ -447,7 +513,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await msg.reply_text(
                 _prompt_link_button_wizard(),
                 parse_mode="Markdown",
-                reply_markup=_back_admin_kb(),
+                reply_markup=_wizard_nav_kb("label", 0),
             )
             raise ApplicationHandlerStop
 
@@ -472,7 +538,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "**Step 2/2 — message**\n\n"
                 "Send the **come-back message** for this step "
                 "(text, photo, video, etc.). Forwards are copied.\n\n"
-                "Then you can add **link buttons** (text → link each time), or **`/skip`**.",
+                "Then you can add **link buttons** (text → link each time), or tap **Skip**.",
                 reply_markup=_back_admin_kb(),
             )
             raise ApplicationHandlerStop
@@ -498,7 +564,7 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await msg.reply_text(
                 _prompt_link_button_wizard(),
                 parse_mode="Markdown",
-                reply_markup=_back_admin_kb(),
+                reply_markup=_wizard_nav_kb("label", 0),
             )
             raise ApplicationHandlerStop
 

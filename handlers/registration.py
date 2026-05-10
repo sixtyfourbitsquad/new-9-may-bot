@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 from configs.settings import Settings
-from handlers import admin_fsm_private, channel_handlers, join_request_handlers, user_handlers, welcome_done
+from handlers import admin_fsm_private, channel_handlers, join_request_handlers, user_handlers
 
 
 def register_handlers(application: Application, settings: Settings) -> None:
@@ -40,9 +40,8 @@ def register_handlers(application: Application, settings: Settings) -> None:
     application.add_handler(CommandHandler("help", user_handlers.cmd_help, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("admin", user_handlers.cmd_admin, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("cancel", user_handlers.cmd_cancel, filters=filters.ChatType.PRIVATE))
-    application.add_handler(
-        CommandHandler("done", welcome_done.cmd_welcome_batch_done, filters=filters.ChatType.PRIVATE)
-    )
+    application.add_handler(CommandHandler("skip", user_handlers.cmd_wizard_skip, filters=filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("done", user_handlers.cmd_done_router, filters=filters.ChatType.PRIVATE))
 
     application.add_handler(
         MessageHandler(
