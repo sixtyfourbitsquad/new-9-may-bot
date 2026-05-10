@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from telegram import Bot
 
@@ -45,6 +46,25 @@ async def scheduler_worker_loop(
                         status=BroadcastStatus.QUEUED,
                     )
                     await broadcast_service.enqueue_broadcast(bid)
+                    intr = payload.get("interval_hours")
+                    if intr is not None:
+                        try:
+                            hours = float(intr)
+                            if hours > 0:
+                                next_run = datetime.now(timezone.utc) + timedelta(hours=hours)
+                                chain_payload = dict(payload)
+                                await scheduled_repo.create_job(
+                                    created_by=int(payload.get("created_by") or 0),
+                                    run_at=next_run,
+                                    payload=chain_payload,
+                                )
+                                logger.info(
+                                    "Scheduled repeating broadcast chain job after #%s in %s h",
+                                    jid,
+                                    hours,
+                                )
+                        except (TypeError, ValueError):
+                            logger.warning("Bad interval_hours on job %s: %s", jid, intr)
                 await scheduled_repo.mark_sent(jid)
             except Exception:
                 logger.exception("Scheduled job %s failed", jid)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
@@ -26,12 +26,12 @@ from services.admin_fsm import (
     STATE_RM_WAIT_BODY,
     STATE_RM_WAIT_HOURS,
     STATE_SCH_WAIT_BODY,
-    STATE_SCH_WAIT_TIME,
+    STATE_SCH_WAIT_FIRST_HOURS,
+    STATE_SCH_WAIT_REPEAT_HOURS,
     STATE_WM_BATCH,
     STATE_WM_WAIT,
     AdminFsm,
 )
-from utils.datetime_parse import parse_iso_utc
 from utils.retention_display import format_retention_delay_human
 from utils.telegram_urls import normalize_manual_live_url
 from utils.keyboard_json import markup_from_json
@@ -114,17 +114,48 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await msg.reply_text(f"Invalid JSON: {e}")
             raise ApplicationHandlerStop
 
-        if state == STATE_SCH_WAIT_TIME:
+        if state == STATE_SCH_WAIT_FIRST_HOURS:
+            raw = (msg.text or "").strip().replace(",", ".")
             try:
-                run_at = parse_iso_utc(msg.text or "")
+                first_hours = float(raw)
             except ValueError:
-                await msg.reply_text("Invalid datetime. Use ISO UTC e.g. `2026-05-10T15:00:00Z`")
+                await msg.reply_text("Send a number: hours **from now** until the first send (e.g. `2`, `0.5`).")
                 raise ApplicationHandlerStop
+            if first_hours < 0:
+                await msg.reply_text("Hours cannot be negative.")
+                raise ApplicationHandlerStop
+            await fsm.set(uid, {"state": STATE_SCH_WAIT_REPEAT_HOURS, "first_hours": first_hours})
+            await msg.reply_text(
+                "**Repeat?** Send hours between each following broadcast, or `0` for **once only**.\n"
+                "Example: `3` means this broadcast runs **every 3 hours** after the first."
+            )
+            raise ApplicationHandlerStop
+
+        if state == STATE_SCH_WAIT_REPEAT_HOURS:
+            raw = (msg.text or "").strip().lower().replace(",", ".")
+            if raw in ("", "no", "once", "n"):
+                repeat_h: float | None = None
+            else:
+                try:
+                    rh = float(raw)
+                except ValueError:
+                    await msg.reply_text("Send a number of hours, or `0` / `no` for a single run.")
+                    raise ApplicationHandlerStop
+                if rh < 0:
+                    await msg.reply_text("Hours cannot be negative.")
+                    raise ApplicationHandlerStop
+                repeat_h = rh if rh > 0 else None
+            first_hours = float(st.get("first_hours") or 0)
+            run_at = datetime.now(timezone.utc) + timedelta(hours=first_hours)
             await fsm.set(
                 uid,
-                {"state": STATE_SCH_WAIT_BODY, "run_at": run_at.isoformat()},
+                {
+                    "state": STATE_SCH_WAIT_BODY,
+                    "run_at": run_at.isoformat(),
+                    "repeat_hours": repeat_h,
+                },
             )
-            await msg.reply_text("Now send the message content (text, photo, poll, etc.).")
+            await msg.reply_text("Now send the **broadcast message** (text, photo, poll, etc.).")
             raise ApplicationHandlerStop
 
         if state == STATE_SCH_WAIT_BODY:
@@ -136,17 +167,27 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if run_at.tzinfo is None:
                 run_at = run_at.replace(tzinfo=timezone.utc)
             pl = message_to_payload(msg)
+            payload: dict = {
+                "mode": "broadcast_enqueue",
+                "created_by": uid,
+                "message": pl,
+            }
+            repeat = st.get("repeat_hours")
+            if repeat is not None and float(repeat) > 0:
+                payload["interval_hours"] = float(repeat)
             jid = await scheduled_repo.create_job(
                 created_by=uid,
                 run_at=run_at,
-                payload={
-                    "mode": "broadcast_enqueue",
-                    "created_by": uid,
-                    "message": pl,
-                },
+                payload=payload,
             )
             await fsm.clear(uid)
-            await msg.reply_text(f"⏱ Scheduled job `#{jid}` saved (fires at run time).")
+            note = ""
+            if payload.get("interval_hours"):
+                note = f" Repeats every **{payload['interval_hours']}** hour(s)."
+            await msg.reply_text(
+                f"⏱ Scheduled job `#{jid}` — first run about `{run_at.isoformat()}` UTC.{note}",
+                parse_mode="Markdown",
+            )
             await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
             raise ApplicationHandlerStop
 

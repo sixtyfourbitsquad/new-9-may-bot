@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from html import escape
@@ -36,7 +37,7 @@ from services.admin_fsm import (
     STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_BODY,
     STATE_RM_WAIT_HOURS,
-    STATE_SCH_WAIT_TIME,
+    STATE_SCH_WAIT_FIRST_HOURS,
     STATE_WM_BATCH,
     STATE_WM_WAIT,
     AdminFsm,
@@ -484,9 +485,13 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if data == "adm:sch:new":
-        await fsm.set(uid, {"state": STATE_SCH_WAIT_TIME})
+        await fsm.set(uid, {"state": STATE_SCH_WAIT_FIRST_HOURS})
         await q.edit_message_text(
-            "Step 1: send **run time** as ISO UTC, e.g.\n`2026-05-10T15:00:00Z`\n\n`/cancel`",
+            "**Step 1/3 — when to run the first time**\n\n"
+            "Send **hours from now** until the first broadcast (decimals ok).\n"
+            "Examples: `0` as soon as the worker runs · `1` in one hour · `24` in 24 h\n\n"
+            "Next the bot will ask if it should **repeat** (e.g. every 3 hours).\n\n"
+            "`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:scheduled")]]
             ),
@@ -504,10 +509,28 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         kb = []
         for j in jobs:
             jid = int(j["id"])
+            pld = j.get("payload")
+            if isinstance(pld, str):
+                try:
+                    pld = json.loads(pld)
+                except json.JSONDecodeError:
+                    pld = {}
+            elif pld is None:
+                pld = {}
+            rep = pld.get("interval_hours")
+            when = j["run_at"]
+            try:
+                if hasattr(when, "strftime"):
+                    tlabel = when.strftime("%Y-%m-%d %H:%M UTC")
+                else:
+                    tlabel = str(when)[:19] + " UTC"
+            except Exception:
+                tlabel = str(when)
+            extra = f" ↻{rep:g}h" if rep is not None and float(rep) > 0 else ""
             kb.append(
                 [
                     InlineKeyboardButton(
-                        f"#{jid} @ {j['run_at']}",
+                        f"#{jid} {tlabel}{extra}",
                         callback_data=f"adm:sch:x:{jid}",
                     )
                 ]

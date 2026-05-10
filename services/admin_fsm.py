@@ -11,7 +11,8 @@ from redis.asyncio import Redis
 # State machine keys (stored JSON: {"state": str, ...})
 STATE_BC_WAIT_MSG = "bc_msg"
 STATE_BC_WAIT_BUTTONS_JSON = "bc_kb"
-STATE_SCH_WAIT_TIME = "sch_time"
+STATE_SCH_WAIT_FIRST_HOURS = "sch_h_first"
+STATE_SCH_WAIT_REPEAT_HOURS = "sch_h_repeat"
 STATE_SCH_WAIT_BODY = "sch_body"
 STATE_WM_WAIT = "wm_body"
 STATE_WM_BATCH = "wm_batch"
