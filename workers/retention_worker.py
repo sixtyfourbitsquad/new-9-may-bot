@@ -13,6 +13,7 @@ from database.repositories.settings_repo import SettingsRepository
 from services.outbound_sender import send_from_payload
 from services.retention_service import RetentionService
 from utils.payload_coerce import coerce_payload_dict
+from utils.retention_display import retention_delay_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def retention_worker_loop(
                 await send_from_payload(bot, chat_id=uid, payload=msg_payload)
                 nxt = step_idx + 1
                 if nxt < len(steps_sorted):
-                    delay = int(steps_sorted[nxt].get("delay_seconds") or 3600)
+                    delay = retention_delay_seconds(steps_sorted[nxt], default=3600)
                     await retention.schedule_next_step(uid, nxt, delay)
             except Forbidden:
                 logger.warning(

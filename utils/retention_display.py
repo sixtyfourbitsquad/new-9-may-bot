@@ -1,5 +1,15 @@
 """Human-readable labels for retention delays (stored as seconds in DB)."""
 
+from typing import Any, Mapping
+
+
+def retention_delay_seconds(row: Mapping[str, Any], *, default: int) -> int:
+    """Resolve delay_seconds; ``0`` is valid (instant). Do not use ``or`` — ``0`` is falsy."""
+    v = row.get("delay_seconds")
+    if v is None:
+        return default
+    return int(v)
+
 
 def format_retention_delay_human(seconds: int) -> str:
     if seconds <= 0:

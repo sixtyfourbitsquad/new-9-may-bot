@@ -17,7 +17,7 @@ from services.livestream_service import LivestreamService
 from services.outbound_sender import merge_inline_keyboard
 from services.retention_service import RetentionService
 from services.welcome_flow import send_welcome_sequence
-from utils.retention_display import format_retention_delay_human
+from utils.retention_display import retention_delay_seconds
 from utils.telegram_urls import normalize_manual_live_url
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,6 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     old = update.chat_member.old_chat_member
     user = update.chat_member.from_user
     if user is None:
-        return
-    # Telegram sends chat_member when the bot itself joins as admin; never DM/welcome the bot id.
-    if user.id == context.bot.id:
         return
 
     joined = new.status in ("member", "administrator", "creator") and old.status in (
@@ -121,13 +118,12 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     retention: RetentionService = context.application.bot_data["services"]["retention"]
-    delay0 = int(rows_sorted[0].get("delay_seconds") or 300)
+    delay0 = retention_delay_seconds(rows_sorted[0], default=300)
     await retention.schedule_first_step(user.id, delay0)
     logger.info(
-        "Retention step 1 scheduled user_id=%s delay_s=%s (%s until first DM) monitored=%s",
+        "Retention step 1 scheduled user_id=%s delay_s=%s monitored=%s",
         user.id,
         delay0,
-        format_retention_delay_human(delay0),
         monitored,
     )
     await context.application.bot_data["repos"]["users"].log_activity(

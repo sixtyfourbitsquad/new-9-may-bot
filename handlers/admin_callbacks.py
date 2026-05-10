@@ -44,7 +44,7 @@ from services.admin_fsm import (
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
 from services.welcome_flow import send_welcome_sequence
-from utils.retention_display import format_retention_delay_human
+from utils.retention_display import format_retention_delay_human, retention_delay_seconds
 
 
 def _h(x: object) -> str:
@@ -679,7 +679,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         kb = []
         for s in steps:
             so = int(s["step_order"])
-            sec = int(s.get("delay_seconds") or 0)
+            sec = retention_delay_seconds(s, default=0)
             label = format_retention_delay_human(sec)
             kb.append(
                 [
