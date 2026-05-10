@@ -41,7 +41,8 @@ async def _register_webhook(application, settings: Settings) -> bool:
     url = settings.webhook_full_url()
     kwargs = {
         "url": url,
-        "allowed_updates": None,
+        # Explicit types so Telegram never drops chat_join_request / chat_member (omit=None varies).
+        "allowed_updates": Update.ALL_TYPES,
         "secret_token": settings.telegram_webhook_secret_token.get_secret_value()
         if settings.telegram_webhook_secret_token
         else None,

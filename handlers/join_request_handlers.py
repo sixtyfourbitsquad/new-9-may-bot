@@ -25,8 +25,25 @@ async def on_chat_join_request(update: Update, context: ContextTypes.DEFAULT_TYP
 
     ch = await settings_repo.get_channel_settings()
     monitored = ch.get("monitored_chat_id")
-    if monitored is None or int(jq.chat.id) != int(monitored):
+    chat_id = int(jq.chat.id)
+    if monitored is None:
+        logger.warning(
+            "chat_join_request ignored: monitored_chat_id not set (Admin → Channel → Set channel)"
+        )
         return
+    if chat_id != int(monitored):
+        logger.info(
+            "chat_join_request ignored: chat_id=%s != monitored_chat_id=%s",
+            chat_id,
+            monitored,
+        )
+        return
+
+    logger.info(
+        "chat_join_request user_id=%s chat=%s — processing welcome / stats",
+        jq.from_user.id,
+        chat_id,
+    )
 
     await settings_repo.increment_join_requests_total()
     await user_svc.ingest_user(jq.from_user, source_channel=str(monitored))

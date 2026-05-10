@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from redis.asyncio import Redis
 from telegram import Bot
+from telegram.error import Forbidden
 
 from database.repositories.settings_repo import SettingsRepository
 from services.outbound_sender import send_from_payload
@@ -52,6 +53,9 @@ async def send_welcome_sequence(
     """
     steps = await settings_repo.list_welcome_steps()
     if not steps:
+        logger.warning(
+            "Welcome skipped: no welcome_messages rows — configure Admin → New user welcome"
+        )
         return
     uid = chat_id
     if redis:
@@ -64,6 +68,13 @@ async def send_welcome_sequence(
         payload = substitute_name_in_payload(raw, display_name)
         try:
             await send_from_payload(bot, chat_id=chat_id, payload=payload)
+        except Forbidden as e:
+            logger.warning(
+                "Welcome DM forbidden user_id=%s — user must open the bot and tap Start first: %s",
+                chat_id,
+                e,
+            )
+            return
         except Exception:
             logger.exception("Welcome step failed step_order=%s", row.get("step_order"))
     if redis:
