@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.files import FSInputFile
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
 from configs.settings import Settings
@@ -195,11 +194,13 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if not os.path.isfile(path):
             await q.answer("Log file path not found on disk.", show_alert=True)
             return
-        await context.bot.send_document(
-            chat_id=q.message.chat_id,
-            document=FSInputFile(path),
-            caption="Application log file",
-        )
+        fname = os.path.basename(path)
+        with open(path, "rb") as fh:
+            await context.bot.send_document(
+                chat_id=q.message.chat_id,
+                document=InputFile(fh, filename=fname),
+                caption="Application log file",
+            )
         await q.answer("Sent document.")
         return
 

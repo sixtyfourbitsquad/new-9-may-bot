@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from database.repositories.onboarding_repo import OnboardingRepository
 from database.repositories.settings_repo import SettingsRepository
+from handlers.admin_callbacks import route_admin_callback
 from middlewares.admin_auth import require_admin
 from services.user_service import UserService
 from services.welcome_flow import send_welcome_sequence
@@ -111,8 +112,6 @@ async def any_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     data = update.callback_query.data if update.callback_query else ""
     if data.startswith("adm:"):
-        from handlers.admin_callbacks import route_admin_callback
-
         await route_admin_callback(update, context)
         return
 
