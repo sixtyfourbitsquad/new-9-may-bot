@@ -53,6 +53,15 @@ async def _register_webhook(application, settings: Settings) -> bool:
         try:
             await application.bot.set_webhook(**kwargs)
             logger.info("Webhook set to %s route_suffix=%s", url, webhook_route)
+            try:
+                whi = await application.bot.get_webhook_info()
+                logger.info(
+                    "Telegram getWebhookInfo: allowed_updates=%s pending_updates=%s",
+                    whi.allowed_updates,
+                    whi.pending_update_count,
+                )
+            except TelegramError as e:
+                logger.warning("getWebhookInfo failed after setWebhook: %s", e)
             return True
         except TelegramError as e:
             last_err = e
@@ -211,6 +220,16 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=403, detail="Invalid webhook secret header")
 
         data = await request.json()
+        cjr = data.get("chat_join_request")
+        if isinstance(cjr, dict):
+            ch = cjr.get("chat") or {}
+            frm = cjr.get("from") or {}
+            logger.info(
+                "Webhook JSON contains chat_join_request update_id=%s chat_id=%s user_id=%s",
+                data.get("update_id"),
+                ch.get("id"),
+                frm.get("id"),
+            )
         application = request.app.state.ptb
         update = Update.de_json(data, application.bot)
         await application.process_update(update)
