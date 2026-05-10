@@ -79,8 +79,13 @@ class LiveChatService:
                     message_id=message.message_id,
                 )
             )
-            if fwd and getattr(message, "media_group_id", None):
-                await self._redis.set(self._map_key(admin_id, fwd.message_id), str(user_id), ex=86400 * 7)
+            # Always map inbox message_id → user (Telegram may hide sender in forward_origin when replying).
+            if fwd:
+                await self._redis.set(
+                    self._map_key(admin_id, fwd.message_id),
+                    str(user_id),
+                    ex=86400 * 7,
+                )
         except Forbidden:
             logger.warning("Cannot forward to admin %s (blocked bot or cannot DM)", admin_id)
         except TelegramError as e:
@@ -97,13 +102,19 @@ class LiveChatService:
             except TelegramError:
                 text = (message.text or message.caption or "")[:3500]
                 try:
-                    await with_flood_wait(
+                    sent = await with_flood_wait(
                         lambda a=admin_id: bot.send_message(
                             chat_id=a,
                             text=f"[fallback] user `{user_id}`:\n{text}",
                             parse_mode="Markdown",
                         )
                     )
+                    if sent:
+                        await self._redis.set(
+                            self._map_key(admin_id, sent.message_id),
+                            str(user_id),
+                            ex=86400 * 7,
+                        )
                 except TelegramError:
                     logger.exception("Fallback DM failed for admin %s", admin_id)
 
@@ -135,8 +146,14 @@ class LiveChatService:
             key = self._map_key(inbox_id, mid)
             raw = await self._redis.get(key)
             if raw:
-                target_user_id = int(raw)
+                s = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                target_user_id = int(s)
         if target_user_id is None:
+            logger.warning(
+                "Admin reply: could not resolve user (reply to msg_id=%s in chat=%s)",
+                rmsg.message_id,
+                message.chat_id,
+            )
             return False
 
         aid = message.from_user.id if message.from_user else 0
