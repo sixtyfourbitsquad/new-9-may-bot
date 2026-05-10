@@ -16,6 +16,7 @@ from services.broadcast_service import BroadcastService
 from services.livestream_service import LivestreamService
 from services.outbound_sender import merge_inline_keyboard
 from services.retention_service import RetentionService
+from utils.telegram_urls import normalize_manual_live_url
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     invite = await live_svc.resolve_invite_link(context.bot, message.chat_id)
     watch_live = _public_live_watch_url(chat_for_links)
+    manual = normalize_manual_live_url(ls_row.get("manual_live_url"))
 
     banner_payload = ls_row.get("banner_payload")
     button_payload = ls_row.get("button_payload")
@@ -125,14 +127,19 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         payload = {"kind": "text", "text": template}
 
     extra_rows: list[list[dict[str, Any]]] = []
-    # Prefer direct live URL for public channels (t.me/username/live); invite as join fallback.
     button_row: list[dict[str, Any]] = []
-    if watch_live:
-        button_row.append({"text": "🔴 Watch live", "url": watch_live})
-    if invite:
-        button_row.append(
-            {"text": "Join channel" if watch_live else "Join channel / live", "url": invite}
-        )
+    # Private channels: set admin "Join live link"; public may still use t.me/.../live + invite.
+    if manual:
+        button_row.append({"text": "Join now", "url": manual})
+        if invite and invite.rstrip("/") != manual.rstrip("/"):
+            button_row.append({"text": "Join channel", "url": invite})
+    else:
+        if watch_live:
+            button_row.append({"text": "🔴 Watch live", "url": watch_live})
+        if invite:
+            button_row.append(
+                {"text": "Join channel" if watch_live else "Join channel / live", "url": invite}
+            )
     if button_row:
         extra_rows.append(button_row)
     if isinstance(button_payload, list):
@@ -140,7 +147,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if extra_rows:
         payload = merge_inline_keyboard(payload, extra_rows=extra_rows)
 
-    primary_link = watch_live or invite
+    primary_link = manual or watch_live or invite
     if primary_link:
         _append_fallback_url_to_payload(payload, primary_link)
 

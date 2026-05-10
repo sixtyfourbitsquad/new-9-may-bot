@@ -162,6 +162,7 @@ class SettingsRepository:
         cooldown_seconds: Optional[int] = None,
         banner_payload: Any = None,
         button_payload: Any = None,
+        manual_live_url: Optional[str] = None,
     ) -> None:
         sets: list[str] = ["updated_at = now()"]
         args: list[Any] = []
@@ -181,6 +182,11 @@ class SettingsRepository:
         if button_payload is not None:
             sets.append(f"button_payload = ${idx}::jsonb")
             args.append(json.dumps(button_payload))
+            idx += 1
+        if manual_live_url is not None:
+            sets.append(f"manual_live_url = ${idx}")
+            v = manual_live_url.strip() if manual_live_url else None
+            args.append(v)
             idx += 1
         sql = f"UPDATE livestream_settings SET {', '.join(sets)} WHERE id = 1;"
         async with self._pool.acquire() as conn:

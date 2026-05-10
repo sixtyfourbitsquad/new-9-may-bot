@@ -20,6 +20,7 @@ from services.admin_fsm import (
     STATE_BTN_WAIT_JSON,
     STATE_BTN_WAIT_NAME,
     STATE_CH_WAIT_ID,
+    STATE_LS_WAIT_MANUAL_URL,
     STATE_LS_WAIT_TEMPLATE,
     STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_BODY,
@@ -31,6 +32,7 @@ from services.admin_fsm import (
     AdminFsm,
 )
 from utils.datetime_parse import parse_iso_utc
+from utils.telegram_urls import normalize_manual_live_url
 from utils.keyboard_json import markup_from_json
 from utils.message_serializer import message_to_payload
 
@@ -263,6 +265,24 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await settings_repo.update_livestream(notification_template=msg.text or "")
             await fsm.clear(uid)
             await msg.reply_text("📡 Livestream template updated.")
+            raise ApplicationHandlerStop
+
+        if state == STATE_LS_WAIT_MANUAL_URL:
+            normalized = normalize_manual_live_url(msg.text or "")
+            if not normalized:
+                await msg.reply_text(
+                    "Could not parse a URL. Send `https://t.me/...` or `t.me/...` "
+                    "(invite or public link)."
+                )
+                raise ApplicationHandlerStop
+            await settings_repo.update_livestream(manual_live_url=normalized)
+            await fsm.clear(uid)
+            await msg.reply_text(
+                "Join live link saved. Livestream alerts will include a Join now button."
+            )
+            await settings_repo.audit_log(
+                "INFO", "livestream", "manual_live_url set", {"admin": uid}
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_AD_WAIT_ID:

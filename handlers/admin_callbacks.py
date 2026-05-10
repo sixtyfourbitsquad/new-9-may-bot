@@ -30,6 +30,7 @@ from services.admin_fsm import (
     STATE_BC_WAIT_MSG,
     STATE_BTN_WAIT_NAME,
     STATE_CH_WAIT_ID,
+    STATE_LS_WAIT_MANUAL_URL,
     STATE_LS_WAIT_TEMPLATE,
     STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_DELAY,
@@ -658,12 +659,15 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:channel":
         ch = await settings_repo.get_channel_settings()
         ls = await settings_repo.get_livestream_settings()
+        murl = str(ls.get("manual_live_url") or "")
+        m_preview = (murl[:80] + "…") if len(murl) > 80 else murl
         text = (
             "📺 **Channel & livestream**\n\n"
             f"Monitored chat (join requests): `{ch.get('monitored_chat_id')}`\n"
             f"Join requests recorded (total): `{ch.get('join_requests_total', 0)}`\n"
             f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
             f"Leave-channel retention: `{ch.get('retention_enabled')}`\n\n"
+            f"Manual Join live URL (private channels):\n`{m_preview or '—'}`\n\n"
             f"Live template:\n`{(ls.get('notification_template') or '')[:200]}`\n"
             f"Cooldown (s): `{ls.get('cooldown_seconds')}`"
         )
@@ -713,6 +717,26 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             ),
             parse_mode="Markdown",
         )
+        return
+
+    if data == "adm:ls:manual":
+        await fsm.set(uid, {"state": STATE_LS_WAIT_MANUAL_URL})
+        await q.edit_message_text(
+            "**Join live link** — sent with livestream alerts as a **Join now** button.\n\n"
+            "Paste an invite or channel URL, e.g.\n"
+            "`https://t.me/+AbCd...` or `t.me/+AbCd...`\n\n"
+            "`/cancel`",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="adm:channel")]]
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data == "adm:ls:manual:clr":
+        await settings_repo.update_livestream(manual_live_url="")
+        await q.answer("Join live link cleared.")
+        await settings_repo.audit_log("INFO", "livestream", "manual_live_url cleared", {"admin": uid})
         return
 
     if data in ("adm:ls:cd:p", "adm:ls:cd:m"):

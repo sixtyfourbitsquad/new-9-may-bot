@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS livestream_settings (
     notification_template   TEXT NOT NULL DEFAULT '🔴 LIVE STREAM STARTED! Join now!',
     banner_payload          JSONB,
     button_payload          JSONB,
+    manual_live_url         TEXT,
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

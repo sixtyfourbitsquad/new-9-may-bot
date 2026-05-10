@@ -73,6 +73,10 @@ def channel_live_menu() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("📡 Livestream text", callback_data="adm:ls:tpl")],
             [
+                InlineKeyboardButton("🔗 Join live link (private)", callback_data="adm:ls:manual"),
+                InlineKeyboardButton("🗑 Clear link", callback_data="adm:ls:manual:clr"),
+            ],
+            [
                 InlineKeyboardButton("Cooldown −60s", callback_data="adm:ls:cd:m"),
                 InlineKeyboardButton("Cooldown +60s", callback_data="adm:ls:cd:p"),
             ],

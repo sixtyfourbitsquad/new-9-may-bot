@@ -22,6 +22,7 @@ STATE_BTN_WAIT_JSON = "btn_json"
 STATE_CH_WAIT_ID = "ch_id"
 STATE_OD_WAIT_BODY = "od_body"
 STATE_LS_WAIT_TEMPLATE = "ls_tpl"
+STATE_LS_WAIT_MANUAL_URL = "ls_manual"
 STATE_AD_WAIT_ID = "ad_id"
 
 
