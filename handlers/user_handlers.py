@@ -90,9 +90,8 @@ async def any_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_svc: UserService = context.application.bot_data["services"]["users"]
     await user_svc.ingest_from_update(update, increment_messages=True)
 
-    admins_repo = context.application.bot_data["repos"]["admins"]
     settings = context.application.bot_data["settings"]
-    if uid in settings.admin_user_ids or await admins_repo.is_admin(uid):
+    if uid in settings.admin_user_ids:
         return
 
     lc = context.application.bot_data["services"]["live_chat"]

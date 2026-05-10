@@ -19,7 +19,7 @@ from handlers import admin_fsm_private, channel_handlers, join_request_handlers,
 def register_handlers(application: Application, settings: Settings) -> None:
     """Attach all handlers with priority groups (lower runs first)."""
 
-    # Staff replies in private chat (recipient list = ENV + DB admins; handler no-ops for others)
+    # ENV-listed admin replies in private chat (handler no-ops for others)
     application.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.REPLY & ~filters.COMMAND,
