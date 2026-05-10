@@ -11,9 +11,12 @@ from telegram import Bot
 from configs.settings import Settings
 from database.repositories.broadcasts import BroadcastRepository
 from database.repositories.scheduled import ScheduledRepository
+from database.repositories.users import UserRepository
 from models.domain import BroadcastStatus
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
+from services.welcome_flow import substitute_name_in_payload
+from utils.payload_coerce import coerce_payload_dict
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,7 @@ async def scheduler_worker_loop(
     scheduled_repo: ScheduledRepository,
     broadcasts_repo: BroadcastRepository,
     broadcast_service: BroadcastService,
+    users: UserRepository,
     stop_event: asyncio.Event,
 ) -> None:
     """Periodically flush due scheduled jobs."""
@@ -37,7 +41,9 @@ async def scheduler_worker_loop(
             try:
                 if mode == "single_user":
                     uid = int(payload["user_id"])
-                    msg = dict(payload["message"])
+                    msg = coerce_payload_dict(dict(payload["message"]))
+                    fn = await users.get_first_name(uid)
+                    msg = substitute_name_in_payload(msg, fn or "")
                     await send_from_payload(bot, chat_id=uid, payload=msg)
                 elif mode == "broadcast_enqueue":
                     bid = await broadcasts_repo.create_broadcast(

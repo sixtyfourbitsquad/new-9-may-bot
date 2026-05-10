@@ -10,7 +10,9 @@ from telegram.error import Forbidden
 
 from configs.settings import Settings
 from database.repositories.settings_repo import SettingsRepository
+from database.repositories.users import UserRepository
 from services.outbound_sender import send_from_payload
+from services.welcome_flow import substitute_name_in_payload
 from services.retention_service import RetentionService
 from utils.payload_coerce import coerce_payload_dict
 from utils.retention_display import retention_delay_seconds
@@ -23,6 +25,7 @@ async def retention_worker_loop(
     bot: Bot,
     settings: Settings,
     settings_repo: SettingsRepository,
+    users: UserRepository,
     retention: RetentionService,
     stop_event: asyncio.Event,
 ) -> None:
@@ -44,6 +47,8 @@ async def retention_worker_loop(
                 if row is None:
                     continue
                 msg_payload = coerce_payload_dict(row.get("payload"))
+                fn = await users.get_first_name(uid)
+                msg_payload = substitute_name_in_payload(msg_payload, fn or "")
                 await send_from_payload(bot, chat_id=uid, payload=msg_payload)
                 nxt = step_idx + 1
                 if nxt < len(steps_sorted):

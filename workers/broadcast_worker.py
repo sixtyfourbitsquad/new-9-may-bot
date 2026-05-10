@@ -16,6 +16,7 @@ from database.repositories.users import UserRepository
 from models.domain import BroadcastStatus, UserBroadcastStatus
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
+from services.welcome_flow import substitute_name_in_payload
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,9 @@ async def broadcast_worker_loop(
                 if await bc_service.is_cancelled(bid):
                     return
                 try:
-                    await send_from_payload(bot, chat_id=uid, payload=payload)
+                    fn = await users.get_first_name(uid)
+                    pl = substitute_name_in_payload(payload, fn or "")
+                    await send_from_payload(bot, chat_id=uid, payload=pl)
                     await broadcasts.log_recipient(broadcast_id=bid, user_id=uid, status="delivered")
                     pipe = redis.pipeline()
                     pipe.hincrby(f"broadcast:stats:{bid}", "delivered", 1)

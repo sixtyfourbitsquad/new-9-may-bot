@@ -20,18 +20,37 @@ _DEFAULT_WELCOME_DEDUP_TTL = 600
 
 
 def substitute_name_in_payload(payload: dict[str, Any], name: str) -> dict[str, Any]:
-    """Deep-copy payload and replace ``{name}`` in text/caption fields."""
+    """Deep-copy payload and replace ``{name}`` in user-visible strings we store."""
     p: dict[str, Any] = copy.deepcopy(payload)
     disp = name or ""
+
+    def sub(s: str) -> str:
+        return s.replace("{name}", disp)
+
     if isinstance(p.get("text"), str):
-        p["text"] = p["text"].replace("{name}", disp)
+        p["text"] = sub(p["text"])
     if isinstance(p.get("caption"), str):
-        p["caption"] = p["caption"].replace("{name}", disp)
+        p["caption"] = sub(p["caption"])
+    if isinstance(p.get("question"), str):
+        p["question"] = sub(p["question"])
+    opts = p.get("options")
+    if isinstance(opts, list):
+        p["options"] = [
+            sub(str(o)) if isinstance(o, str) else o for o in opts
+        ]
     items = p.get("items")
     if isinstance(items, list):
         for it in items:
             if isinstance(it, dict) and isinstance(it.get("caption"), str):
-                it["caption"] = it["caption"].replace("{name}", disp)
+                it["caption"] = sub(it["caption"])
+    rows = p.get("inline_keyboard")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            for btn in row:
+                if isinstance(btn, dict) and isinstance(btn.get("text"), str):
+                    btn["text"] = sub(btn["text"])
     return p
 
 
