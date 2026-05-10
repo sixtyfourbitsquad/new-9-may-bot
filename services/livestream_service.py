@@ -31,10 +31,28 @@ class LivestreamService:
         return bool(ok)
 
     async def resolve_invite_link(self, bot: Bot, chat_id: int) -> Optional[str]:
-        """Try to export invite link for channel/supergroup."""
+        """Resolve a join link: primary invite, chat.invite_link, or newly created link."""
         try:
             link = await with_flood_wait(lambda: bot.export_chat_invite_link(chat_id))
-            return link
+            if link:
+                return str(link)
         except TelegramError as e:
-            logger.warning("Could not export invite link for %s: %s", chat_id, e)
-            return None
+            logger.warning("export_chat_invite_link failed for %s: %s", chat_id, e)
+
+        try:
+            chat = await with_flood_wait(lambda: bot.get_chat(chat_id))
+            inv = getattr(chat, "invite_link", None)
+            if inv:
+                return str(inv)
+        except TelegramError as e:
+            logger.warning("get_chat (invite_link) failed for %s: %s", chat_id, e)
+
+        try:
+            created = await with_flood_wait(lambda: bot.create_chat_invite_link(chat_id))
+            il = getattr(created, "invite_link", None)
+            if il:
+                return str(il)
+        except TelegramError as e:
+            logger.warning("create_chat_invite_link failed for %s: %s", chat_id, e)
+
+        return None

@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from configs.settings import Settings
@@ -25,6 +26,19 @@ def _public_live_watch_url(chat) -> str | None:
     if not username:
         return None
     return f"https://t.me/{username}/live"
+
+
+def _append_fallback_url_to_payload(payload: dict[str, Any], url: str) -> None:
+    """Ensure at least one tappable https URL in the body (some clients lose inline keyboards)."""
+    if not url.strip():
+        return
+    kind = str(payload.get("kind") or "text")
+    suffix = f"\n\n{url.strip()}"
+    if kind == "text":
+        payload["text"] = str(payload.get("text") or "").rstrip() + suffix
+        return
+    if kind in ("photo", "video", "animation", "audio", "voice", "document"):
+        payload["caption"] = str(payload.get("caption") or "").rstrip() + suffix
 
 
 async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -93,8 +107,13 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     template = str(ls_row.get("notification_template") or "🔴 LIVE STREAM STARTED! Join now!")
+    try:
+        chat_for_links = await context.bot.get_chat(message.chat_id)
+    except TelegramError:
+        chat_for_links = message.chat
+
     invite = await live_svc.resolve_invite_link(context.bot, message.chat_id)
-    watch_live = _public_live_watch_url(message.chat)
+    watch_live = _public_live_watch_url(chat_for_links)
 
     banner_payload = ls_row.get("banner_payload")
     button_payload = ls_row.get("button_payload")
@@ -120,6 +139,10 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         extra_rows.extend(list(button_payload))
     if extra_rows:
         payload = merge_inline_keyboard(payload, extra_rows=extra_rows)
+
+    primary_link = watch_live or invite
+    if primary_link:
+        _append_fallback_url_to_payload(payload, primary_link)
 
     br = context.application.bot_data["repos"]["broadcasts"]
     bc_service: BroadcastService = context.application.bot_data["services"]["broadcast"]
