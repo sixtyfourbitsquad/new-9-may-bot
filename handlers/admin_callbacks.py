@@ -624,13 +624,27 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # --- Retention ---
     if data == "adm:retention":
-        await q.edit_message_text("♻️ **Retention**", reply_markup=retention_menu(), parse_mode="Markdown")
+        await q.edit_message_text(
+            "♻️ **Come-back messages**\n\n"
+            "When someone **leaves** the monitored channel, the bot schedules these messages "
+            "to their **private chat** with the bot.\n\n"
+            "**Delay** = seconds to wait **before that step** "
+            "(step 1: after they left the channel; step 2+: after the previous message was sent). "
+            "Use `0` for almost immediate (~1s).\n\n"
+            "/cancel",
+            reply_markup=retention_menu(),
+            parse_mode="Markdown",
+        )
         return
 
     if data == "adm:rm:add":
         await fsm.set(uid, {"state": STATE_RM_WAIT_DELAY})
         await q.edit_message_text(
-            "First send **delay seconds** before this message (e.g. `3600`).\n`/cancel`",
+            "**Seconds to wait before this step**\n\n"
+            "• **First step:** wait after the user **left** the channel "
+            "(use `0` for almost instant).\n"
+            "• **Later steps:** wait after the **previous** come-back message.\n\n"
+            "Examples: `0` fast · `300` 5 min · `86400` 24 h\n`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:retention")]]
             ),

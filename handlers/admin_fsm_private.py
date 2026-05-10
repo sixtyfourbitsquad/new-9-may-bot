@@ -194,10 +194,15 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 if delay < 0:
                     raise ValueError
             except ValueError:
-                await msg.reply_text("Send delay as integer seconds (e.g. `3600`).")
+                await msg.reply_text(
+                    "Send a whole number of seconds (e.g. `0` for fast, `3600` for 1 hour)."
+                )
                 raise ApplicationHandlerStop
             await fsm.set(uid, {"state": STATE_RM_WAIT_BODY, "delay": delay})
-            await msg.reply_text("Send the retention message content.")
+            await msg.reply_text(
+                "Now send the **come-back message** for this step "
+                "(text, photo, video, etc.). Forwards are copied."
+            )
             raise ApplicationHandlerStop
 
         if state == STATE_RM_WAIT_BODY:
@@ -207,7 +212,10 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             mx = max((int(s.get("step_order") or 0) for s in steps), default=0)
             await settings_repo.upsert_retention_step(mx + 1, delay, pl)
             await fsm.clear(uid)
-            await msg.reply_text(f"♻️ Retention step `{mx + 1}` saved (delay before this step: {delay}s).")
+            await msg.reply_text(
+                f"♻️ Come-back step `{mx + 1}` saved "
+                f"(wait **{delay}s** before this step is sent)."
+            )
             await settings_repo.audit_log("INFO", "retention", f"step {mx+1}", {"admin": uid})
             raise ApplicationHandlerStop
 
