@@ -53,9 +53,12 @@ def register_handlers(application: Application, settings: Settings) -> None:
 
     application.add_handler(CallbackQueryHandler(user_handlers.any_callback))
 
+    # Group 1: must run *after* group-0 `admin_fsm_private` (PTB allows only one handler
+    # per group; the FSM handler always matched first and blocked inbox forwarding).
     application.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & ~filters.COMMAND,
             user_handlers.any_private_message,
-        )
+        ),
+        group=1,
     )
