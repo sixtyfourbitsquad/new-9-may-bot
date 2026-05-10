@@ -147,8 +147,10 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if extra_rows:
         payload = merge_inline_keyboard(payload, extra_rows=extra_rows)
 
+    # Duplicate URL in message text only when we could not attach inline URL buttons
+    # (e.g. invite export failed). If Join now / Watch live buttons exist, skip — avoids clutter.
     primary_link = manual or watch_live or invite
-    if primary_link:
+    if primary_link and not button_row:
         _append_fallback_url_to_payload(payload, primary_link)
 
     br = context.application.bot_data["repos"]["broadcasts"]
