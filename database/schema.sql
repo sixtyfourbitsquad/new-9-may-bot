@@ -127,10 +127,12 @@ ON CONFLICT (id) DO NOTHING;
 -- channel_settings (monitored chat + retention toggles)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS channel_settings (
-    id                      SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    monitored_chat_id       BIGINT,
-    retention_enabled       BOOLEAN NOT NULL DEFAULT TRUE,
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                          SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    monitored_chat_id           BIGINT,
+    retention_enabled           BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_approve_join_requests  BOOLEAN NOT NULL DEFAULT FALSE,
+    join_requests_total         BIGINT NOT NULL DEFAULT 0,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 INSERT INTO channel_settings (id) VALUES (1)
@@ -173,3 +175,32 @@ CREATE TABLE IF NOT EXISTS user_activity (
 
 CREATE INDEX IF NOT EXISTS idx_user_activity_user ON user_activity (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_activity_created ON user_activity (created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- onboarding_messages + onboarding_drip_jobs (post-/start drip, PG-backed)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS onboarding_messages (
+    step_order      INT PRIMARY KEY CHECK (step_order >= 1 AND step_order <= 20),
+    delay_seconds   INT NOT NULL,
+    payload         JSONB NOT NULL DEFAULT '{}'
+);
+
+INSERT INTO onboarding_messages (step_order, delay_seconds, payload) VALUES
+    (1, 3600, '{}'),
+    (2, 86400, '{}'),
+    (3, 259200, '{}')
+ON CONFLICT (step_order) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS onboarding_drip_jobs (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL,
+    step_order      INT NOT NULL,
+    fire_at         TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at         TIMESTAMPTZ,
+    UNIQUE (user_id, step_order)
+);
+
+CREATE INDEX IF NOT EXISTS idx_onboarding_drip_fire_pending
+    ON onboarding_drip_jobs (fire_at)
+    WHERE sent_at IS NULL;

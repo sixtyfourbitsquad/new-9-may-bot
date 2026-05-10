@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatJoinRequestHandler,
     ChatMemberHandler,
     CommandHandler,
     MessageHandler,
@@ -12,7 +13,7 @@ from telegram.ext import (
 )
 
 from configs.settings import Settings
-from handlers import admin_fsm_private, channel_handlers, user_handlers
+from handlers import admin_fsm_private, channel_handlers, join_request_handlers, user_handlers, welcome_done
 
 
 def register_handlers(application: Application, settings: Settings) -> None:
@@ -29,6 +30,7 @@ def register_handlers(application: Application, settings: Settings) -> None:
     application.add_handler(
         ChatMemberHandler(channel_handlers.on_chat_member, chat_member_types=ChatMemberHandler.CHAT_MEMBER)
     )
+    application.add_handler(ChatJoinRequestHandler(join_request_handlers.on_chat_join_request))
     application.add_handler(
         MessageHandler(filters.UpdateType.CHANNEL_POST, channel_handlers.on_channel_post)
     )
@@ -37,6 +39,9 @@ def register_handlers(application: Application, settings: Settings) -> None:
     application.add_handler(CommandHandler("help", user_handlers.cmd_help, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("admin", user_handlers.cmd_admin, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("cancel", user_handlers.cmd_cancel, filters=filters.ChatType.PRIVATE))
+    application.add_handler(
+        CommandHandler("done", welcome_done.cmd_welcome_batch_done, filters=filters.ChatType.PRIVATE)
+    )
 
     application.add_handler(
         MessageHandler(

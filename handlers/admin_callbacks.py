@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import os
+import time
+
+from telegram import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from configs.settings import Settings
+from database.pool import get_pool
 from database.repositories.settings_repo import SettingsRepository
 from keyboards.admin_menus import (
     admins_menu,
     broadcasts_menu,
     buttons_menu,
     channel_live_menu,
+    onboarding_menu,
     retention_menu,
     scheduled_menu,
     welcome_menu,
@@ -26,13 +31,16 @@ from services.admin_fsm import (
     STATE_BTN_WAIT_NAME,
     STATE_CH_WAIT_ID,
     STATE_LS_WAIT_TEMPLATE,
+    STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_DELAY,
     STATE_SCH_WAIT_TIME,
+    STATE_WM_BATCH,
     STATE_WM_WAIT,
     AdminFsm,
 )
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
+from services.welcome_flow import send_welcome_sequence
 
 
 async def _owner_only(uid: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -77,6 +85,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     admins_repo = context.application.bot_data["repos"]["admins"]
     bc_svc: BroadcastService = context.application.bot_data["services"]["broadcast"]
     fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
+    ob = context.application.bot_data["repos"]["onboarding"]
 
     # --- Navigation ---
     if data == "adm:home":
@@ -95,21 +104,68 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data == "adm:queue":
         qlen = await redis.llen(settings.redis_broadcast_queue)
-        text = f"🧱 **Queue**\n\nBroadcast Redis depth: `{qlen}`"
-        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
+        active_rows = await br.list_active()
+        active_preview = ", ".join(str(int(r["id"])) for r in active_rows[:8]) if active_rows else "—"
+        text = (
+            f"🧱 **Broadcast queue**\n\n"
+            f"Redis depth: `{qlen}`\n"
+            f"Active jobs: `{active_preview}`"
+        )
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("🧹 Clear Redis queue", callback_data="adm:queue:clr")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
+            ]
+        )
+        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        return
+
+    if data == "adm:queue:clr":
+        await redis.delete(settings.redis_broadcast_queue)
+        await q.answer("Pending Redis broadcast queue cleared.")
+        await settings_repo.audit_log("INFO", "queue", "redis cleared", {"admin": uid})
         return
 
     if data == "adm:health":
-        await q.edit_message_text(
-            "❤️ **Health**\n\nPostgreSQL pool + Redis + workers run inside this process.",
-            reply_markup=back_button(),
-            parse_mode="Markdown",
+        started = float(context.application.bot_data.get("process_started_at") or time.time())
+        uptime_s = int(time.time() - started)
+        db_ok = False
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            db_ok = True
+        except Exception:
+            pass
+        redis_ok = False
+        try:
+            await redis.ping()
+            redis_ok = True
+        except Exception:
+            pass
+        text = (
+            "❤️ **Health**\n\n"
+            f"Uptime: `{uptime_s}` s\n"
+            f"PostgreSQL: `{'ok' if db_ok else 'fail'}`\n"
+            f"Redis: `{'ok' if redis_ok else 'fail'}`\n"
+            f"Workers: broadcast, scheduler, retention, onboarding (same process)\n"
+            f"Onboarding drip env: `{settings.onboarding_drip_enabled}`\n"
         )
+        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
         return
 
     if data == "adm:users":
         stats = await users_repo.get_stats_snapshot()
-        text = "📈 **Users**\n\n" + "\n".join(f"`{k}` → `{v}`" for k, v in stats.items())
+        win = await users_repo.get_activity_windows()
+        ch = await settings_repo.get_channel_settings()
+        lines = [f"`{k}` → `{v}`" for k, v in stats.items()]
+        lines.append("")
+        lines.append("**Activity (last_seen)**")
+        for k, v in win.items():
+            lines.append(f"`{k}` → `{v}`")
+        lines.append("")
+        lines.append(f"Join requests (total): `{ch.get('join_requests_total', 0)}`")
+        text = "📈 **Users**\n\n" + "\n".join(lines)
         await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
         return
 
@@ -120,7 +176,65 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             lines.append(
                 f"`{r['created_at']}` [{r['level']}] {r['source']}: {(r['message'] or '')[:80]}"
             )
-        text = "📜 **Recent logs**\n\n" + ("\n".join(lines) if lines else "_empty_")
+        text = "📜 **Recent logs** (DB audit)\n\n" + ("\n".join(lines) if lines else "_empty_")
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📎 Full log file", callback_data="adm:logs:doc")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
+            ]
+        )
+        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        return
+
+    if data == "adm:logs:doc":
+        path = settings.log_file_path
+        if not path:
+            await q.answer("Set LOG_FILE_PATH in the environment.", show_alert=True)
+            return
+        if not os.path.isfile(path):
+            await q.answer("Log file path not found on disk.", show_alert=True)
+            return
+        await context.bot.send_document(
+            chat_id=q.message.chat_id,
+            document=FSInputFile(path),
+            caption="Application log file",
+        )
+        await q.answer("Sent document.")
+        return
+
+    if data == "adm:config":
+        ch = await settings_repo.get_channel_settings()
+        wc = await users_repo.count_welcome_completions()
+        started = float(context.application.bot_data.get("process_started_at") or time.time())
+        uptime_s = int(time.time() - started)
+        adm_txt = ", ".join(str(x) for x in settings.admin_user_ids[:16])
+        pool_ok = False
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            pool_ok = True
+        except Exception:
+            pass
+        redis_ok = False
+        try:
+            await redis.ping()
+            redis_ok = True
+        except Exception:
+            pass
+        text = (
+            "⚙️ **Configuration**\n\n"
+            f"Uptime: `{uptime_s}` s\n"
+            f"`/start` completions logged: `{wc}`\n"
+            f"Monitored channel id: `{ch.get('monitored_chat_id')}`\n"
+            f"Join requests (total): `{ch.get('join_requests_total', 0)}`\n"
+            f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
+            f"ADMIN_USER_IDS: `{adm_txt}`\n"
+            f"PostgreSQL: `{'ok' if pool_ok else 'fail'}`\n"
+            f"Redis: `{'ok' if redis_ok else 'fail'}`\n"
+            f"Onboarding drip: `{settings.onboarding_drip_enabled}` (env `ONBOARDING_DRIP_ENABLED`)\n"
+            f"Webhook URL: `{settings.webhook_full_url()}`\n"
+        )
         await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
         return
 
@@ -166,6 +280,29 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if data == "adm:bc:sd":
+        draft = await fsm.get_draft_broadcast(uid)
+        if not draft:
+            await q.answer("No draft.", show_alert=True)
+            return
+        n = await users_repo.count_active_recipients()
+        await q.edit_message_text(
+            f"📣 **Confirm broadcast**\n\n"
+            f"Queue send to approximately **`{n}`** active recipients?\n\n"
+            "Tap **Confirm & queue** to proceed.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("✅ Confirm & queue", callback_data="adm:bc:go"),
+                        InlineKeyboardButton("❌ Cancel draft", callback_data="adm:bc:xx"),
+                    ],
+                    [InlineKeyboardButton("⬅️ Broadcasts", callback_data="adm:broadcasts")],
+                ]
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data == "adm:bc:go":
         draft = await fsm.get_draft_broadcast(uid)
         if not draft:
             await q.answer("No draft.", show_alert=True)
@@ -339,6 +476,59 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    if data == "adm:wm:add_batch":
+        await fsm.set(uid, {"state": STATE_WM_BATCH, "pending": []})
+        await q.edit_message_text(
+            "Send welcome steps **one by one** (text or media; forwards use copy mode).\n"
+            "When finished, send `/done`.\n\n`/cancel`",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")]]
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data == "adm:wm:pv":
+        disp = (q.from_user.first_name if q.from_user else None) or "Friend"
+        await send_welcome_sequence(
+            context.bot,
+            chat_id=q.message.chat_id,
+            display_name=disp,
+            settings_repo=settings_repo,
+        )
+        await q.answer("Preview sent to this chat.")
+        return
+
+    if data == "adm:onboard":
+        rows = await ob.list_messages()
+        lines: list[str] = ["🌱 **Onboarding drip** (scheduled from `/start`)\n"]
+        for r in rows:
+            pl = dict(r.get("payload") or {})
+            has_body = bool(pl) and pl != {}
+            lines.append(
+                f"`{r['step_order']}` — +`{r['delay_seconds']}`s — configured: `{has_body}`"
+            )
+        lines.append("")
+        lines.append("Set `ONBOARDING_DRIP_ENABLED` in the environment to enable sends.")
+        await q.edit_message_text(
+            "\n".join(lines),
+            reply_markup=onboarding_menu(),
+            parse_mode="Markdown",
+        )
+        return
+
+    if data.startswith("adm:od:set:"):
+        so = int(data.split(":")[-1])
+        await fsm.set(uid, {"state": STATE_OD_WAIT_BODY, "od_step": so})
+        await q.edit_message_text(
+            f"Send onboarding content for step **`{so}`**. Use `{{name}}` in text/captions.\n`/cancel`",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="adm:onboard")]]
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
     if data == "adm:wm:list":
         steps = await settings_repo.list_welcome_steps()
         if not steps:
@@ -415,8 +605,10 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         ls = await settings_repo.get_livestream_settings()
         text = (
             "📺 **Channel & livestream**\n\n"
-            f"Monitored chat: `{ch.get('monitored_chat_id')}`\n"
-            f"Retention: `{ch.get('retention_enabled')}`\n\n"
+            f"Monitored chat (join requests): `{ch.get('monitored_chat_id')}`\n"
+            f"Join requests recorded (total): `{ch.get('join_requests_total', 0)}`\n"
+            f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
+            f"Leave-channel retention: `{ch.get('retention_enabled')}`\n\n"
             f"Live template:\n`{(ls.get('notification_template') or '')[:200]}`\n"
             f"Cooldown (s): `{ls.get('cooldown_seconds')}`"
         )
@@ -426,12 +618,25 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:ch:s":
         await fsm.set(uid, {"state": STATE_CH_WAIT_ID})
         await q.edit_message_text(
-            "Send numeric **chat id** (negative for channels/groups).\n`/cancel`",
+            "**Forward** any post from the channel here, or send numeric **chat id** "
+            "(negative for channels/supergroups).\n`/cancel`",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="adm:channel")]]
             ),
             parse_mode="Markdown",
         )
+        return
+
+    if data == "adm:ch:auto:1":
+        await settings_repo.set_auto_approve_join_requests(True)
+        await q.answer("Auto-approve enabled.")
+        await settings_repo.audit_log("INFO", "channel", "auto_approve on", {"admin": uid})
+        return
+
+    if data == "adm:ch:auto:0":
+        await settings_repo.set_auto_approve_join_requests(False)
+        await q.answer("Auto-approve disabled.")
+        await settings_repo.audit_log("INFO", "channel", "auto_approve off", {"admin": uid})
         return
 
     if data == "adm:ch:ret:1":

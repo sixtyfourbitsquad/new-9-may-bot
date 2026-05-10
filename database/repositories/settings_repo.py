@@ -30,6 +30,27 @@ class SettingsRepository:
                 chat_id,
             )
 
+    async def increment_join_requests_total(self) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE channel_settings
+                SET join_requests_total = join_requests_total + 1, updated_at = now()
+                WHERE id = 1;
+                """
+            )
+
+    async def set_auto_approve_join_requests(self, enabled: bool) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE channel_settings
+                SET auto_approve_join_requests = $1, updated_at = now()
+                WHERE id = 1;
+                """,
+                enabled,
+            )
+
     async def get_livestream_settings(self) -> dict[str, Any]:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM livestream_settings WHERE id = 1;")

@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -21,6 +22,7 @@ from configs.settings import Settings, get_settings
 from database.pool import close_pool, get_pool, init_pool
 from database.repositories.admins import AdminRepository
 from workers.broadcast_worker import broadcast_worker_loop
+from workers.onboarding_worker import onboarding_worker_loop
 from workers.retention_worker import retention_worker_loop
 from workers.scheduler_worker import scheduler_worker_loop
 
@@ -48,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await seed_initial_owner(settings, admins_repo)
 
     application = build_application(settings=settings, redis=redis, pool=pool)
+    application.bot_data["process_started_at"] = time.time()
     await application.initialize()
     await application.start()
 
@@ -87,6 +90,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 stop_event=stop_event,
             ),
             name="retention-worker",
+        ),
+        asyncio.create_task(
+            onboarding_worker_loop(
+                bot=application.bot,
+                settings=settings,
+                onboarding=application.bot_data["repos"]["onboarding"],
+                users=application.bot_data["repos"]["users"],
+                stop_event=stop_event,
+            ),
+            name="onboarding-worker",
         ),
     ]
 

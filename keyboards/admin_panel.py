@@ -32,6 +32,9 @@ def main_menu() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("🔘 Buttons", callback_data="adm:buttons"),
                 InlineKeyboardButton("❤️ Health", callback_data="adm:health"),
             ],
+            [
+                InlineKeyboardButton("⚙️ Configuration", callback_data="adm:config"),
+            ],
         ]
     )
 

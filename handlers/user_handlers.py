@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from database.repositories.onboarding_repo import OnboardingRepository
 from database.repositories.settings_repo import SettingsRepository
 from middlewares.admin_auth import require_admin
-from services.outbound_sender import send_from_payload
 from services.user_service import UserService
+from services.welcome_flow import send_welcome_sequence
 
 logger = logging.getLogger(__name__)
-
-
-def _substitute_name(text: str, name: str) -> str:
-    return text.replace("{name}", name or "")
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -25,18 +23,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     settings_repo: SettingsRepository = context.application.bot_data["repos"]["settings"]
     user_svc: UserService = context.application.bot_data["services"]["users"]
+    users_repo = context.application.bot_data["repos"]["users"]
+    settings = context.application.bot_data["settings"]
+
     await user_svc.ingest_from_update(update)
 
-    steps = await settings_repo.list_welcome_steps()
     name = update.effective_user.first_name or update.effective_user.full_name or ""
-    for row in sorted(steps, key=lambda r: int(r.get("step_order") or 0)):
-        payload = dict(row.get("payload") or {})
-        if payload.get("kind") == "text" and isinstance(payload.get("text"), str):
-            payload["text"] = _substitute_name(payload["text"], name)
-        try:
-            await send_from_payload(context.bot, chat_id=update.effective_chat.id, payload=payload)
-        except Exception:
-            logger.exception("Welcome step failed")
+    await send_welcome_sequence(
+        context.bot,
+        chat_id=update.effective_chat.id,
+        display_name=name,
+        settings_repo=settings_repo,
+    )
+
+    await users_repo.log_activity(update.effective_user.id, "welcome_completed", {})
+
+    if settings.onboarding_drip_enabled:
+        onboarding: OnboardingRepository = context.application.bot_data["repos"]["onboarding"]
+        await onboarding.enqueue_for_user(update.effective_user.id, datetime.now(timezone.utc))
 
     if update.message:
         await update.message.reply_text(

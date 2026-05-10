@@ -10,6 +10,7 @@ from telegram.ext import Application
 from configs.settings import Settings
 from database.repositories.admins import AdminRepository
 from database.repositories.broadcasts import BroadcastRepository
+from database.repositories.onboarding_repo import OnboardingRepository
 from database.repositories.scheduled import ScheduledRepository
 from database.repositories.settings_repo import SettingsRepository
 from database.repositories.users import UserRepository
@@ -46,6 +47,7 @@ def build_application(*, settings: Settings, redis: Redis, pool) -> Application:
     broadcasts_repo = BroadcastRepository(pool)
     scheduled_repo = ScheduledRepository(pool)
     settings_repo = SettingsRepository(pool)
+    onboarding_repo = OnboardingRepository(pool)
 
     rate_lc = RateLimitService(redis, prefix=f"{settings.redis_rate_prefix}lc:")
     live_chat = LiveChatService(
@@ -85,6 +87,7 @@ def build_application(*, settings: Settings, redis: Redis, pool) -> Application:
         "broadcasts": broadcasts_repo,
         "scheduled": scheduled_repo,
         "settings": settings_repo,
+        "onboarding": onboarding_repo,
     }
     fsm = AdminFsm(redis, settings.redis_fsm_prefix)
 

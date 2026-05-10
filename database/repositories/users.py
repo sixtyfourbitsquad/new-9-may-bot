@@ -115,6 +115,38 @@ class UserRepository:
             )
         return dict(row) if row else {}
 
+    async def get_activity_windows(self) -> dict[str, Any]:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE last_seen > now() - interval '24 hours')::bigint AS active_24h,
+                    COUNT(*) FILTER (WHERE last_seen > now() - interval '7 days')::bigint AS active_7d,
+                    COUNT(*) FILTER (WHERE last_seen > now() - interval '30 days')::bigint AS active_30d
+                FROM users;
+                """
+            )
+        return dict(row) if row else {}
+
+    async def count_welcome_completions(self) -> int:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*)::bigint AS c FROM user_activity WHERE action = 'welcome_completed';
+                """
+            )
+        return int(row["c"]) if row else 0
+
+    async def get_first_name(self, user_id: int) -> Optional[str]:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT first_name FROM users WHERE user_id = $1;",
+                user_id,
+            )
+        if row is None or row.get("first_name") is None:
+            return None
+        return str(row["first_name"])
+
     async def log_activity(self, user_id: int, action: str, meta: Optional[dict[str, Any]] = None) -> None:
         import json
 

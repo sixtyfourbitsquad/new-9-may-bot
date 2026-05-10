@@ -12,6 +12,7 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 from database.repositories.scheduled import ScheduledRepository
 from database.repositories.settings_repo import SettingsRepository
 from models.domain import AdminRole
+from database.repositories.onboarding_repo import OnboardingRepository
 from services.admin_fsm import (
     STATE_AD_WAIT_ID,
     STATE_BC_WAIT_BUTTONS_JSON,
@@ -20,10 +21,12 @@ from services.admin_fsm import (
     STATE_BTN_WAIT_NAME,
     STATE_CH_WAIT_ID,
     STATE_LS_WAIT_TEMPLATE,
+    STATE_OD_WAIT_BODY,
     STATE_RM_WAIT_BODY,
     STATE_RM_WAIT_DELAY,
     STATE_SCH_WAIT_BODY,
     STATE_SCH_WAIT_TIME,
+    STATE_WM_BATCH,
     STATE_WM_WAIT,
     AdminFsm,
 )
@@ -61,7 +64,8 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     uid = update.effective_user.id
     admins_repo = context.application.bot_data["repos"]["admins"]
-    if not await admins_repo.is_admin(uid):
+    settings_cfg = context.application.bot_data["settings"]
+    if uid not in settings_cfg.admin_user_ids and not await admins_repo.is_admin(uid):
         return
 
     fsm: AdminFsm = context.application.bot_data["services"]["fsm"]
@@ -143,6 +147,16 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await settings_repo.audit_log("INFO", "scheduler", f"job {jid}", {"admin": uid})
             raise ApplicationHandlerStop
 
+        if state == STATE_WM_BATCH:
+            pl = message_to_payload(msg)
+            pending = list(st.get("pending") or [])
+            pending.append(pl)
+            await fsm.set(uid, {"state": STATE_WM_BATCH, "pending": pending})
+            await msg.reply_text(
+                f"Step `{len(pending)}` queued. Send more messages or `/done`."
+            )
+            raise ApplicationHandlerStop
+
         if state == STATE_WM_WAIT:
             pl = message_to_payload(msg)
             steps = await settings_repo.list_welcome_steps()
@@ -151,6 +165,25 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await fsm.clear(uid)
             await msg.reply_text(f"👋 Welcome step `{mx + 1}` saved.")
             await settings_repo.audit_log("INFO", "welcome", f"step {mx+1}", {"admin": uid})
+            raise ApplicationHandlerStop
+
+        if state == STATE_OD_WAIT_BODY:
+            step_order = int(st.get("od_step") or 0)
+            if step_order <= 0:
+                await fsm.clear(uid)
+                raise ApplicationHandlerStop
+            onboarding_repo: OnboardingRepository = context.application.bot_data["repos"]["onboarding"]
+            rows = await onboarding_repo.list_messages()
+            delay = 3600
+            for r in rows:
+                if int(r.get("step_order") or 0) == step_order:
+                    delay = int(r.get("delay_seconds") or delay)
+                    break
+            pl = message_to_payload(msg)
+            await onboarding_repo.upsert_message(step_order, delay, pl)
+            await fsm.clear(uid)
+            await msg.reply_text(f"🌱 Onboarding step `{step_order}` message saved.")
+            await settings_repo.audit_log("INFO", "onboarding", f"step {step_order}", {"admin": uid})
             raise ApplicationHandlerStop
 
         if state == STATE_RM_WAIT_DELAY:
@@ -204,12 +237,22 @@ async def admin_fsm_private(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             raise ApplicationHandlerStop
 
         if state == STATE_CH_WAIT_ID:
-            raw = (msg.text or "").strip()
-            try:
-                cid = int(raw)
-            except ValueError:
-                await msg.reply_text("Send numeric chat id (negative for channels/supergroups).")
-                raise ApplicationHandlerStop
+            cid: int | None = None
+            fo = msg.forward_origin
+            if fo is not None:
+                ch_obj = getattr(fo, "chat", None) or getattr(fo, "sender_chat", None)
+                if ch_obj is not None and getattr(ch_obj, "id", None) is not None:
+                    cid = int(ch_obj.id)
+            if cid is None:
+                raw = (msg.text or "").strip()
+                try:
+                    cid = int(raw)
+                except ValueError:
+                    await msg.reply_text(
+                        "Forward a post from the channel here, or paste numeric chat id "
+                        "(negative for channels/supergroups)."
+                    )
+                    raise ApplicationHandlerStop
             await settings_repo.set_monitored_chat(cid)
             await fsm.clear(uid)
             await msg.reply_text(f"📺 Monitored chat set to `{cid}`.")

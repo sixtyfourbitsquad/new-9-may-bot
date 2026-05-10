@@ -29,8 +29,22 @@ def welcome_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("➕ Add step", callback_data="adm:wm:add")],
+            [InlineKeyboardButton("📝 Batch add (/done)", callback_data="adm:wm:add_batch")],
+            [InlineKeyboardButton("👁 Preview sequence", callback_data="adm:wm:pv")],
             [InlineKeyboardButton("📋 List steps", callback_data="adm:wm:list")],
+            [InlineKeyboardButton("🌱 Onboarding drip", callback_data="adm:onboard")],
             [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
+        ]
+    )
+
+
+def onboarding_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Set step 1 (+1h)", callback_data="adm:od:set:1")],
+            [InlineKeyboardButton("Set step 2 (+1d)", callback_data="adm:od:set:2")],
+            [InlineKeyboardButton("Set step 3 (+3d)", callback_data="adm:od:set:3")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="adm:welcome")],
         ]
     )
 
@@ -48,7 +62,11 @@ def retention_menu() -> InlineKeyboardMarkup:
 def channel_live_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🎯 Set monitored chat id", callback_data="adm:ch:s")],
+            [InlineKeyboardButton("🎯 Set channel (forward or id)", callback_data="adm:ch:s")],
+            [
+                InlineKeyboardButton("✅ Auto-approve ON", callback_data="adm:ch:auto:1"),
+                InlineKeyboardButton("⛔ Auto-approve OFF", callback_data="adm:ch:auto:0"),
+            ],
             [
                 InlineKeyboardButton("Retention ON", callback_data="adm:ch:ret:1"),
                 InlineKeyboardButton("Retention OFF", callback_data="adm:ch:ret:0"),

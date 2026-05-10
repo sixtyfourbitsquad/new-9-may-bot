@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     # Storage for downloaded media cache (optional)
     storage_dir: str = "./storage"
 
+    # Post-/start onboarding drip (+1h/+1d/+3d jobs in Postgres); disable to skip scheduling/sends
+    onboarding_drip_enabled: bool = Field(default=True, validation_alias="ONBOARDING_DRIP_ENABLED")
+
+    # Optional path to append-only log file for “download full log” in admin panel
+    log_file_path: str | None = Field(default=None, validation_alias="LOG_FILE_PATH")
+
     @field_validator("webhook_base_url")
     @classmethod
     def strip_slash(cls, v: str) -> str:
