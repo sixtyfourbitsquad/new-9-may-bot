@@ -19,6 +19,14 @@ from services.retention_service import RetentionService
 logger = logging.getLogger(__name__)
 
 
+def _public_live_watch_url(chat) -> str | None:
+    """Telegram opens the channel live page at t.me/<username>/live for public chats."""
+    username = getattr(chat, "username", None)
+    if not username:
+        return None
+    return f"https://t.me/{username}/live"
+
+
 async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Track joins to monitored chat + trigger retention on leave."""
     if update.chat_member is None:
@@ -86,6 +94,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     template = str(ls_row.get("notification_template") or "🔴 LIVE STREAM STARTED! Join now!")
     invite = await live_svc.resolve_invite_link(context.bot, message.chat_id)
+    watch_live = _public_live_watch_url(message.chat)
 
     banner_payload = ls_row.get("banner_payload")
     button_payload = ls_row.get("button_payload")
@@ -97,8 +106,16 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         payload = {"kind": "text", "text": template}
 
     extra_rows: list[list[dict[str, Any]]] = []
+    # Prefer direct live URL for public channels (t.me/username/live); invite as join fallback.
+    button_row: list[dict[str, Any]] = []
+    if watch_live:
+        button_row.append({"text": "🔴 Watch live", "url": watch_live})
     if invite:
-        extra_rows.append([{"text": "Join channel / live", "url": invite}])
+        button_row.append(
+            {"text": "Join channel" if watch_live else "Join channel / live", "url": invite}
+        )
+    if button_row:
+        extra_rows.append(button_row)
     if isinstance(button_payload, list):
         extra_rows.extend(list(button_payload))
     if extra_rows:
