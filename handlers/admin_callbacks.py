@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
@@ -42,6 +43,11 @@ from services.admin_fsm import (
 from services.broadcast_service import BroadcastService
 from services.outbound_sender import send_from_payload
 from services.welcome_flow import send_welcome_sequence
+
+
+def _h(x: object) -> str:
+    """Escape dynamic fragments for Telegram HTML parse mode."""
+    return escape(str(x), quote=False)
 
 
 async def _owner_only(uid: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -124,13 +130,13 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "adm:dashboard":
         stats = await users_repo.get_stats_snapshot()
         text = (
-            "📊 **Quick summary**\n\n"
-            f"· Everyone who used the bot: `{stats.get('total', 0)}`\n"
-            f"· Can still receive messages: `{stats.get('active', 0)}`\n"
-            f"· Blocked the bot: `{stats.get('blocked', 0)}`\n\n"
-            "Advanced URL and webhook settings: open **Bot setup**."
+            "📊 <b>Quick summary</b>\n\n"
+            f"· Everyone who used the bot: <code>{_h(stats.get('total', 0))}</code>\n"
+            f"· Can still receive messages: <code>{_h(stats.get('active', 0))}</code>\n"
+            f"· Blocked the bot: <code>{_h(stats.get('blocked', 0))}</code>\n\n"
+            "Advanced URL and webhook settings: open <b>Bot setup</b>."
         )
-        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="HTML")
         return
 
     if data == "adm:queue":
@@ -138,9 +144,9 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         active_rows = await br.list_active()
         active_preview = ", ".join(str(int(r["id"])) for r in active_rows[:8]) if active_rows else "—"
         text = (
-            "📬 **Message sending queue**\n\n"
-            f"· Lines waiting to send: `{qlen}`\n"
-            f"· Active send jobs: `{active_preview}`\n\n"
+            "📬 <b>Message sending queue</b>\n\n"
+            f"· Lines waiting to send: <code>{_h(qlen)}</code>\n"
+            f"· Active send jobs: <code>{_h(active_preview)}</code>\n\n"
             "Clear the line only if support asked you to."
         )
         kb = InlineKeyboardMarkup(
@@ -149,7 +155,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
             ]
         )
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
         return
 
     if data == "adm:queue:clr":
@@ -176,46 +182,48 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
         text = (
-            "❤️ **Health**\n\n"
-            f"Uptime: `{uptime_s}` s\n"
-            f"PostgreSQL: `{'ok' if db_ok else 'fail'}`\n"
-            f"Redis: `{'ok' if redis_ok else 'fail'}`\n"
-            f"Workers: broadcast, scheduler, retention, onboarding (same process)\n"
-            f"Onboarding drip env: `{settings.onboarding_drip_enabled}`\n"
+            "❤️ <b>Health</b>\n\n"
+            f"Uptime: <code>{_h(uptime_s)}</code> s\n"
+            f"PostgreSQL: <code>{_h('ok' if db_ok else 'fail')}</code>\n"
+            f"Redis: <code>{_h('ok' if redis_ok else 'fail')}</code>\n"
+            "Workers: broadcast, scheduler, retention, onboarding (same process)\n"
+            f"Onboarding drip env: <code>{_h(settings.onboarding_drip_enabled)}</code>\n"
         )
-        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="HTML")
         return
 
     if data == "adm:users":
         stats = await users_repo.get_stats_snapshot()
         win = await users_repo.get_activity_windows()
         ch = await settings_repo.get_channel_settings()
-        lines = [f"`{k}` → `{v}`" for k, v in stats.items()]
+        lines = [f"<code>{_h(k)}</code> → {_h(v)}" for k, v in stats.items()]
         lines.append("")
-        lines.append("**Activity (last_seen)**")
+        lines.append("<b>Activity (last_seen)</b>")
         for k, v in win.items():
-            lines.append(f"`{k}` → `{v}`")
+            lines.append(f"<code>{_h(k)}</code> → {_h(v)}")
         lines.append("")
-        lines.append(f"Join requests (total): `{ch.get('join_requests_total', 0)}`")
-        text = "📈 **Users**\n\n" + "\n".join(lines)
-        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
+        lines.append(f"Join requests (total): {_h(ch.get('join_requests_total', 0))}")
+        text = "📈 <b>Users</b>\n\n" + "\n".join(lines)
+        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="HTML")
         return
 
     if data == "adm:logs":
         rows = await settings_repo.fetch_recent_logs(12)
         lines = []
         for r in rows:
+            snippet = (r["message"] or "")[:80]
             lines.append(
-                f"`{r['created_at']}` [{r['level']}] {r['source']}: {(r['message'] or '')[:80]}"
+                f"{_h(r['created_at'])} [{_h(r['level'])}] {_h(r['source'])}: {_h(snippet)}"
             )
-        text = "📜 **Recent logs** (DB audit)\n\n" + ("\n".join(lines) if lines else "_empty_")
+        body = "\n".join(lines) if lines else "<i>empty</i>"
+        text = "📜 <b>Recent logs</b> (DB audit)\n\n" + body
         kb = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("📎 Full log file", callback_data="adm:logs:doc")],
                 [InlineKeyboardButton("⬅️ Back", callback_data="adm:home")],
             ]
         )
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
         return
 
     if data == "adm:logs:doc":
@@ -257,19 +265,20 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
         text = (
-            "⚙️ **Configuration**\n\n"
-            f"Uptime: `{uptime_s}` s\n"
-            f"`/start` completions logged: `{wc}`\n"
-            f"Monitored channel id: `{ch.get('monitored_chat_id')}`\n"
-            f"Join requests (total): `{ch.get('join_requests_total', 0)}`\n"
-            f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
-            f"Staff ids (env): `{adm_txt}`\n"
-            f"PostgreSQL: `{'ok' if pool_ok else 'fail'}`\n"
-            f"Redis: `{'ok' if redis_ok else 'fail'}`\n"
-            f"Onboarding drip: `{settings.onboarding_drip_enabled}` (env `ONBOARDING_DRIP_ENABLED`)\n"
-            f"Webhook URL: `{settings.webhook_full_url()}`\n"
+            "⚙️ <b>Configuration</b>\n\n"
+            f"Uptime: <code>{_h(uptime_s)}</code> s\n"
+            f"/start completions logged: <code>{_h(wc)}</code>\n"
+            f"Monitored channel id: <code>{_h(ch.get('monitored_chat_id'))}</code>\n"
+            f"Join requests (total): <code>{_h(ch.get('join_requests_total', 0))}</code>\n"
+            f"Auto-approve join: <code>{_h(ch.get('auto_approve_join_requests', False))}</code>\n"
+            f"Staff ids (env): <code>{_h(adm_txt)}</code>\n"
+            f"PostgreSQL: <code>{_h('ok' if pool_ok else 'fail')}</code>\n"
+            f"Redis: <code>{_h('ok' if redis_ok else 'fail')}</code>\n"
+            f"Onboarding drip: <code>{_h(settings.onboarding_drip_enabled)}</code> "
+            f"(env ONBOARDING_DRIP_ENABLED)\n"
+            f"Webhook URL: <code>{_h(settings.webhook_full_url())}</code>\n"
         )
-        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=back_button(), parse_mode="HTML")
         return
 
     # --- Broadcasts ---
@@ -661,17 +670,20 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         ls = await settings_repo.get_livestream_settings()
         murl = str(ls.get("manual_live_url") or "")
         m_preview = (murl[:80] + "…") if len(murl) > 80 else murl
+        tmpl = (ls.get("notification_template") or "")[:200]
         text = (
-            "📺 **Channel & livestream**\n\n"
-            f"Monitored chat (join requests): `{ch.get('monitored_chat_id')}`\n"
-            f"Join requests recorded (total): `{ch.get('join_requests_total', 0)}`\n"
-            f"Auto-approve join: `{ch.get('auto_approve_join_requests', False)}`\n"
-            f"Leave-channel retention: `{ch.get('retention_enabled')}`\n\n"
-            f"Manual Join live URL (private channels):\n`{m_preview or '—'}`\n\n"
-            f"Live template:\n`{(ls.get('notification_template') or '')[:200]}`\n"
-            f"Cooldown (s): `{ls.get('cooldown_seconds')}`"
+            "📺 <b>Channel &amp; livestream</b>\n\n"
+            f"Monitored chat (join requests): <code>{_h(ch.get('monitored_chat_id'))}</code>\n"
+            f"Join requests recorded (total): <code>{_h(ch.get('join_requests_total', 0))}</code>\n"
+            f"Auto-approve join: <code>{_h(ch.get('auto_approve_join_requests', False))}</code>\n"
+            f"Leave-channel retention: <code>{_h(ch.get('retention_enabled'))}</code>\n\n"
+            "Manual Join live URL (private channels):\n"
+            f"<code>{_h(m_preview or '—')}</code>\n\n"
+            "Live template:\n"
+            f"<code>{_h(tmpl)}</code>\n"
+            f"Cooldown (s): <code>{_h(ls.get('cooldown_seconds'))}</code>"
         )
-        await q.edit_message_text(text, reply_markup=channel_live_menu(), parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=channel_live_menu(), parse_mode="HTML")
         return
 
     if data == "adm:ch:s":
@@ -800,8 +812,8 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data == "adm:ad:list":
         rows = await admins_repo.list_admins()
-        lines = [f"`{r['admin_id']}` — `{r['role']}`" for r in rows]
-        text = "👮 **Admins**\n\n" + ("\n".join(lines) if lines else "_none_")
+        lines = [f"<code>{_h(r['admin_id'])}</code> — {_h(r['role'])}" for r in rows]
+        text = "👮 <b>Admins</b>\n\n" + ("\n".join(lines) if lines else "<i>none</i>")
         kb = []
         if await _owner_only(uid, context):
             for r in rows:
@@ -811,7 +823,7 @@ async def route_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                         [InlineKeyboardButton(f"Remove {aid}", callback_data=f"adm:ad:x:{aid}")]
                     )
         kb.append([InlineKeyboardButton("⬅️ Back", callback_data="adm:admins")])
-        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
         return
 
     if data == "adm:ad:new":
