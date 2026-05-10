@@ -168,14 +168,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.stop_event = stop_event
     app.state.worker_tasks = tasks
 
+    # Register webhook in the background so Uvicorn can bind and /health works while
+    # Telegram retries setWebhook (can take ~30s). Startup used to block on await here.
+    webhook_task: asyncio.Task | None = None
+
+    async def _webhook_registration_job() -> None:
+        try:
+            ok = await _register_webhook(application, settings)
+            app.state.webhook_registered = ok
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Webhook registration task crashed")
+            app.state.webhook_registered = False
+
     if settings.webhook_register_on_startup:
-        ok = await _register_webhook(application, settings)
-        app.state.webhook_registered = ok
+        app.state.webhook_registered = None  # pending until background task finishes
+        webhook_task = asyncio.create_task(_webhook_registration_job())
+        app.state.webhook_register_task = webhook_task
     else:
         logger.warning("WEBHOOK_REGISTER_ON_STARTUP=false — skipping setWebhook (dev mode)")
         app.state.webhook_registered = False
+        app.state.webhook_register_task = None
 
     yield
+
+    if webhook_task:
+        webhook_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await webhook_task
 
     stop_event.set()
     for t in tasks:
@@ -200,9 +221,11 @@ def create_app() -> FastAPI:
     async def health(request: Request) -> dict[str, str]:
         reg = getattr(request.app.state, "webhook_registered", None)
         body: dict[str, str] = {"status": "ok"}
-        if reg is False:
+        if reg is None:
+            body["webhook"] = "registering"
+        elif reg is False:
             body["webhook"] = "not_registered"
-        elif reg is True:
+        else:
             body["webhook"] = "registered"
         return body
 
